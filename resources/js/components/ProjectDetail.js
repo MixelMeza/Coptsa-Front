@@ -1,4 +1,4 @@
-import { getProyecto, updateProyecto } from '../api/proyectos';
+import { getProyecto, updateProyecto, updateTrazado } from '../api/proyectos';
 
 async function loadLeaflet() {
   if (window.L) return window.L;
@@ -14,6 +14,20 @@ async function loadLeaflet() {
     s.onload = () => resolve();
     s.onerror = reject;
     document.body.appendChild(s);
+  });
+
+  // 🟢 NUEVO: librería Leaflet Draw
+  const drawCss = document.createElement('link');
+  drawCss.rel = 'stylesheet';
+  drawCss.href = 'https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.css';
+  document.head.appendChild(drawCss);
+
+  await new Promise((resolve, reject) => {
+    const script = document.createElement('script');
+    script.src = 'https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.js';
+    script.onload = resolve;
+    script.onerror = reject;
+    document.body.appendChild(script);
   });
   return window.L;
 }
@@ -32,7 +46,14 @@ export async function mountProjectDetail(root, id) {
       <div><strong>ID:</strong> ${proyecto.proyectosID}</div>
       <div><strong>Distancia:</strong> ${proyecto.distancia ?? ''}</div>
       <div><strong>Marcadores:</strong> ${proyecto.marcadores ?? 0}</div>
-      <div class="mt-4"><button id="save-proyecto" class="px-3 py-1 bg-green-600 text-white rounded">Guardar</button></div>
+      <div class="mt-4 space-y-2">
+      <div>
+        <button id="save-proyecto" class="px-3 py-1 bg-green-600 text-white rounded w-full">Guardar</button>
+      </div>
+      <div>
+        <button id="draw-trazado" class="px-3 py-1 bg-blue-600 text-white rounded w-full">Dibujar</button>
+      </div>
+      </div>
     `;
 
     const mapWrap = document.createElement('div');
@@ -45,12 +66,57 @@ export async function mountProjectDetail(root, id) {
     root.appendChild(container);
 
     const L = await loadLeaflet();
-    const map = L.map('map').setView([0,0],2);
+    const map = L.map('map').setView([0, 0], 2);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '&copy; OSM' }).addTo(map);
+    //
+    // --- Control de dibujo ---
+    const drawnItems = new L.FeatureGroup();
+    map.addLayer(drawnItems);
 
+    const drawControl = new L.Control.Draw({
+      edit: { featureGroup: drawnItems },
+      draw: {
+        polygon: true,
+        polyline: true,
+        circle: false,
+        marker: false,
+        rectangle: false
+      }
+    });
+
+    // ✅ Ahora sí: agregar el listener al botón
+    const drawBtn = document.getElementById('draw-trazado');
+    drawBtn.addEventListener('click', () => {
+      map.addControl(drawControl);
+      alert('Modo dibujo activado. Usa las herramientas del mapa para trazar.');
+    });
+
+
+    // Cuando el usuario crea un trazado
+    map.on(L.Draw.Event.CREATED, async function (event) {
+    const layer = event.layer;
+    drawnItems.addLayer(layer);
+
+    // Combinar todos los trazados en uno solo
+    const allGeoJson = {
+      type: "FeatureCollection",
+      features: drawnItems.getLayers().map(l => l.toGeoJSON())
+    };
+
+    try {
+      await updateTrazado(proyecto.proyectosID, allGeoJson);
+      alert('Trazado guardado correctamente');
+    } catch (err) {
+      alert('Error al guardar trazado: ' + (err.response?.data?.message || err.message));
+    }
+  });
+
+    //
     let geojson = proyecto.json;
     if (geojson && geojson.type) {
       const layer = L.geoJSON(geojson).addTo(map);
+      layer.addTo(drawnItems); // para que forme parte de los layers editables
+      layer.addTo(map); // Agregar la capa al mapa
       try {
         const bounds = layer.getBounds();
         if (bounds.isValid()) map.fitBounds(bounds);

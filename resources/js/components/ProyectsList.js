@@ -44,68 +44,68 @@ function makeTable(items) {
     tr.style.background = idx % 2 === 0 ? '#fff' : '#f9f9fc';
     tr.onmouseover = () => tr.style.background = '#eaf3ff';
     tr.onmouseout = () => tr.style.background = idx % 2 === 0 ? '#fff' : '#f9f9fc';
-  tr.appendChild(createCell(p.proyectosID ?? p.id ?? ''));
-  tr.appendChild(createCell(p.nombre || ''));
-      tr.appendChild(createCell(p.distancia != null ? p.distancia + ' km' : ''));
-  // Estado: 1=Activo, 0=Inactivo, otro=texto
-      let estadoTxt = '';
-      if (p.estado === 1) estadoTxt = 'Activo';
-      else if (p.estado === 0) estadoTxt = 'Inactivo';
-      else if (typeof p.estado === 'string') estadoTxt = p.estado;
-      else estadoTxt = String(p.estado ?? '');
-      tr.appendChild(createCell(estadoTxt));
-  // Fecha creación: mostrar solo fecha y hora legible
-      let fechaTxt = '';
-      if (p.fechaCreacion) {
-        fechaTxt = String(p.fechaCreacion).replace('T', ' ').substring(0, 16);
-      } else if (p.fecha) {
-        fechaTxt = String(p.fecha).replace('T', ' ').substring(0, 16);
-      }
-      tr.appendChild(createCell(fechaTxt));
-  tr.appendChild(createCell(p.marcadores != null ? p.marcadores : ''));
-  tr.appendChild(createCell(p.rutas != null ? p.rutas : ''));
-  tr.appendChild(createCell(p.mangas != null ? p.mangas : ''));
-  tr.appendChild(createCell(p.reservas != null ? p.reservas : ''));
-  tr.appendChild(createCell(p.nap1 != null ? p.nap1 : ''));
-  tr.appendChild(createCell(p.nap2 != null ? p.nap2 : ''));
-  tr.appendChild(createCell(p.ont != null ? p.ont : ''));
-  tr.appendChild(createCell(p.postes != null ? p.postes : ''));
+    tr.appendChild(createCell(p.proyectosID ?? p.id ?? ''));
+    tr.appendChild(createCell(p.nombre || ''));
+    tr.appendChild(createCell(p.distancia != null ? p.distancia + ' km' : ''));
+    // Estado: 1=Activo, 0=Inactivo, otro=texto
+    let estadoTxt = '';
+    if (p.estado === 1) estadoTxt = 'Activo';
+    else if (p.estado === 0) estadoTxt = 'Inactivo';
+    else if (typeof p.estado === 'string') estadoTxt = p.estado;
+    else estadoTxt = String(p.estado ?? '');
+    tr.appendChild(createCell(estadoTxt));
+    // Fecha creación: mostrar solo fecha y hora legible
+    let fechaTxt = '';
+    if (p.fechaCreacion) {
+      fechaTxt = String(p.fechaCreacion).replace('T', ' ').substring(0, 16);
+    } else if (p.fecha) {
+      fechaTxt = String(p.fecha).replace('T', ' ').substring(0, 16);
+    }
+    tr.appendChild(createCell(fechaTxt));
+    tr.appendChild(createCell(p.marcadores != null ? p.marcadores : ''));
+    tr.appendChild(createCell(p.rutas != null ? p.rutas : ''));
+    tr.appendChild(createCell(p.mangas != null ? p.mangas : ''));
+    tr.appendChild(createCell(p.reservas != null ? p.reservas : ''));
+    tr.appendChild(createCell(p.nap1 != null ? p.nap1 : ''));
+    tr.appendChild(createCell(p.nap2 != null ? p.nap2 : ''));
+    tr.appendChild(createCell(p.ont != null ? p.ont : ''));
+    tr.appendChild(createCell(p.postes != null ? p.postes : ''));
 
-  const actions = document.createElement('td');
-  actions.style.padding = '8px 12px';
-  actions.style.borderBottom = '1px solid #eee';
-  // Botón Ver
-  const viewBtn = document.createElement('button');
-  viewBtn.className = 'btn view-btn';
-  viewBtn.type = 'button';
-  viewBtn.textContent = 'Ver';
-  viewBtn.dataset.id = p.proyectosID ?? p.id ?? '';
-  viewBtn.style.background = '#2563eb';
-  viewBtn.style.color = '#fff';
-  viewBtn.style.border = 'none';
-  viewBtn.style.borderRadius = '5px';
-  viewBtn.style.padding = '6px 14px';
-  viewBtn.style.marginRight = '6px';
-  viewBtn.style.cursor = 'pointer';
-  viewBtn.onmouseover = () => viewBtn.style.background = '#174ea6';
-  viewBtn.onmouseout = () => viewBtn.style.background = '#2563eb';
-  // Botón Borrar
-  const delBtn = document.createElement('button');
-  delBtn.className = 'btn delete-btn';
-  delBtn.type = 'button';
-  delBtn.textContent = 'Borrar';
-  delBtn.dataset.id = p.proyectosID ?? p.id ?? '';
-  delBtn.style.background = '#ef4444';
-  delBtn.style.color = '#fff';
-  delBtn.style.border = 'none';
-  delBtn.style.borderRadius = '5px';
-  delBtn.style.padding = '6px 14px';
-  delBtn.style.cursor = 'pointer';
-  delBtn.onmouseover = () => delBtn.style.background = '#b91c1c';
-  delBtn.onmouseout = () => delBtn.style.background = '#ef4444';
-  actions.appendChild(viewBtn);
-  actions.appendChild(delBtn);
-  tr.appendChild(actions);
+    const actions = document.createElement('td');
+    actions.style.padding = '8px 12px';
+    actions.style.borderBottom = '1px solid #eee';
+    // Botón Ver
+    const viewBtn = document.createElement('button');
+    viewBtn.className = 'btn view-btn';
+    viewBtn.type = 'button';
+    viewBtn.textContent = 'Ver';
+    viewBtn.dataset.id = p.proyectosID ?? p.id ?? '';
+    viewBtn.style.background = '#2563eb';
+    viewBtn.style.color = '#fff';
+    viewBtn.style.border = 'none';
+    viewBtn.style.borderRadius = '5px';
+    viewBtn.style.padding = '6px 14px';
+    viewBtn.style.marginRight = '6px';
+    viewBtn.style.cursor = 'pointer';
+    viewBtn.onmouseover = () => viewBtn.style.background = '#174ea6';
+    viewBtn.onmouseout = () => viewBtn.style.background = '#2563eb';
+    // Botón Borrar
+    const delBtn = document.createElement('button');
+    delBtn.className = 'btn delete-btn';
+    delBtn.type = 'button';
+    delBtn.textContent = 'Borrar';
+    delBtn.dataset.id = p.proyectosID ?? p.id ?? '';
+    delBtn.style.background = '#ef4444';
+    delBtn.style.color = '#fff';
+    delBtn.style.border = 'none';
+    delBtn.style.borderRadius = '5px';
+    delBtn.style.padding = '6px 14px';
+    delBtn.style.cursor = 'pointer';
+    delBtn.onmouseover = () => delBtn.style.background = '#b91c1c';
+    delBtn.onmouseout = () => delBtn.style.background = '#ef4444';
+    actions.appendChild(viewBtn);
+    actions.appendChild(delBtn);
+    tr.appendChild(actions);
 
     tbody.appendChild(tr);
   });
@@ -175,6 +175,7 @@ export async function mountProjectsList(root) {
       ];
     }
   } catch (err) {
+    console.error('❌ Error al conectar con el backend:', err);
     usedMock = true;
     proyectos = [
       {
