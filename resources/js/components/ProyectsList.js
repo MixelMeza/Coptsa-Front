@@ -4,19 +4,12 @@ import { listProyectos, deleteProyecto } from '../api/proyectos';
 function createCell(text) {
   const td = document.createElement('td');
   td.textContent = text != null ? String(text) : '';
-  td.style.padding = '8px 12px';
-  td.style.borderBottom = '1px solid #eee';
-  td.style.fontSize = '15px';
   return td;
 }
 
 function makeTable(items) {
   const table = document.createElement('table');
   table.className = 'projects-table';
-  table.style.width = '100%';
-  table.style.borderCollapse = 'collapse';
-  table.style.background = '#fff';
-  table.style.boxShadow = '0 2px 8px rgba(0,0,0,0.04)';
 
   const thead = document.createElement('thead');
   const headRow = document.createElement('tr');
@@ -26,24 +19,14 @@ function makeTable(items) {
   ].forEach(h => {
     const th = document.createElement('th');
     th.textContent = h;
-    th.style.background = '#f7f7fa';
-    th.style.padding = '10px 12px';
-    th.style.fontWeight = '600';
-    th.style.fontSize = '15px';
-    th.style.borderBottom = '2px solid #e0e0e0';
-    th.style.textAlign = 'left';
     headRow.appendChild(th);
   });
   thead.appendChild(headRow);
   table.appendChild(thead);
 
   const tbody = document.createElement('tbody');
-  (items || []).forEach((p, idx) => {
+  (items || []).forEach(p => {
     const tr = document.createElement('tr');
-    // Zebra striping
-    tr.style.background = idx % 2 === 0 ? '#fff' : '#f9f9fc';
-    tr.onmouseover = () => tr.style.background = '#eaf3ff';
-    tr.onmouseout = () => tr.style.background = idx % 2 === 0 ? '#fff' : '#f9f9fc';
   tr.appendChild(createCell(p.proyectosID ?? p.id ?? ''));
   tr.appendChild(createCell(p.nombre || ''));
       tr.appendChild(createCell(p.distancia != null ? p.distancia + ' km' : ''));
@@ -71,41 +54,23 @@ function makeTable(items) {
   tr.appendChild(createCell(p.ont != null ? p.ont : ''));
   tr.appendChild(createCell(p.postes != null ? p.postes : ''));
 
-  const actions = document.createElement('td');
-  actions.style.padding = '8px 12px';
-  actions.style.borderBottom = '1px solid #eee';
-  // Botón Ver
-  const viewBtn = document.createElement('button');
-  viewBtn.className = 'btn view-btn';
-  viewBtn.type = 'button';
-  viewBtn.textContent = 'Ver';
-  viewBtn.dataset.id = p.proyectosID ?? p.id ?? '';
-  viewBtn.style.background = '#2563eb';
-  viewBtn.style.color = '#fff';
-  viewBtn.style.border = 'none';
-  viewBtn.style.borderRadius = '5px';
-  viewBtn.style.padding = '6px 14px';
-  viewBtn.style.marginRight = '6px';
-  viewBtn.style.cursor = 'pointer';
-  viewBtn.onmouseover = () => viewBtn.style.background = '#174ea6';
-  viewBtn.onmouseout = () => viewBtn.style.background = '#2563eb';
-  // Botón Borrar
-  const delBtn = document.createElement('button');
-  delBtn.className = 'btn delete-btn';
-  delBtn.type = 'button';
-  delBtn.textContent = 'Borrar';
-  delBtn.dataset.id = p.proyectosID ?? p.id ?? '';
-  delBtn.style.background = '#ef4444';
-  delBtn.style.color = '#fff';
-  delBtn.style.border = 'none';
-  delBtn.style.borderRadius = '5px';
-  delBtn.style.padding = '6px 14px';
-  delBtn.style.cursor = 'pointer';
-  delBtn.onmouseover = () => delBtn.style.background = '#b91c1c';
-  delBtn.onmouseout = () => delBtn.style.background = '#ef4444';
-  actions.appendChild(viewBtn);
-  actions.appendChild(delBtn);
-  tr.appendChild(actions);
+    const actions = document.createElement('td');
+    const viewBtn = document.createElement('button');
+    viewBtn.className = 'btn view-btn';
+    viewBtn.type = 'button';
+    viewBtn.textContent = 'Ver';
+    viewBtn.dataset.id = p.proyectosID ?? p.id ?? '';
+
+    const delBtn = document.createElement('button');
+    delBtn.className = 'btn delete-btn';
+    delBtn.type = 'button';
+    delBtn.textContent = 'Borrar';
+    delBtn.dataset.id = p.proyectosID ?? p.id ?? '';
+
+    actions.appendChild(viewBtn);
+    actions.appendChild(document.createTextNode(' '));
+    actions.appendChild(delBtn);
+    tr.appendChild(actions);
 
     tbody.appendChild(tr);
   });
