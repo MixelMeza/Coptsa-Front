@@ -140,6 +140,7 @@ export async function mountProjectsList(root) {
       ];
     }
   } catch (err) {
+    console.error('❌ Error al conectar con el backend:', err);
     usedMock = true;
     proyectos = [
       {

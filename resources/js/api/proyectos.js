@@ -21,3 +21,8 @@ export async function deleteProyecto(id) {
   const res = await axios.delete(`${API_BASE}/proyectos/${id}`);
   return res.data;
 }
+
+export async function updateTrazado(idProyecto, trazadoData) {
+  const res = await axios.put(`${API_BASE}/proyectos/${idProyecto}/trazado`, trazadoData);
+  return res.data;
+}
