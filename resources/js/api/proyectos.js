@@ -26,3 +26,8 @@ export async function updateTrazado(idProyecto, trazadoData) {
   const res = await axios.put(`${API_BASE}/proyectos/${idProyecto}/trazado`, trazadoData);
   return res.data;
 }
+
+export async function createProyecto(proyecto) {
+  const res = await axios.post(`${API_BASE}/proyectos`, proyecto);
+  return res.data;
+}

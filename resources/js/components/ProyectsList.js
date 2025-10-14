@@ -8,6 +8,24 @@ function createCell(text) {
 }
 
 function makeTable(items) {
+  // Crear botón 'Crear proyecto' arriba de la tabla
+  if (!document.getElementById('btn-create-project')) {
+    const btn = document.createElement('button');
+    btn.id = 'btn-create-project';
+    btn.textContent = 'Crear proyecto';
+    btn.style.background = '#2563eb';
+    btn.style.color = '#fff';
+    btn.style.border = 'none';
+    btn.style.borderRadius = '6px';
+    btn.style.padding = '10px 22px';
+    btn.style.fontSize = '16px';
+    btn.style.marginBottom = '18px';
+    btn.style.cursor = 'pointer';
+    btn.onclick = () => { window.location.href = '/projects/create'; };
+    // Insertar antes de la tabla
+    const root = document.getElementById('projects-list-root');
+    if (root) root.prepend(btn);
+  }
   const table = document.createElement('table');
   table.className = 'projects-table';
 
