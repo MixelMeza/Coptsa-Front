@@ -11,6 +11,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     const isCreate = root.dataset.id === 'new';
     let nombre = '';
     let tramos = [];
+    let marcadores = [];
 
     if (!isCreate) {
         try {
@@ -22,6 +23,10 @@ document.addEventListener('DOMContentLoaded', async () => {
                 if (Array.isArray(data.trazos)) tramos = data.trazos;
                 else if (data.json && data.json.trazos) tramos = data.json.trazos;
                 else if (Array.isArray(data.tramos)) tramos = data.tramos;
+                // markers: backend may return 'marcadores' at top-level or inside data.json
+                if (Array.isArray(data.marcadores)) marcadores = data.marcadores;
+                else if (data.json && Array.isArray(data.json.marcadores)) marcadores = data.json.marcadores;
+                else if (Array.isArray(data.markers)) marcadores = data.markers; // fallback english
             }
         } catch (e) {
             console.error('Error cargando proyecto', e);
@@ -34,8 +39,8 @@ document.addEventListener('DOMContentLoaded', async () => {
         </div>
         <div id="map" style="height:520px; margin-bottom:1rem;"></div>
         <div style="display:flex;gap:12px;align-items:center;margin-bottom:8px;">
-            <button id="save-tramos" class="btn">${isCreate ? 'Crear Proyecto y Trazos' : 'Guardar Trazos'}</button>
-            <span style="color:#666;font-size:14px;">Haz click para añadir puntos. Mueve el cursor para ver una previsualización del segmento. Pulsa "Terminar" para finalizar el trazo. Haz click en un trazo para editar sus datos. Puedes crear varios trazos sin guardar; guarda todo cuando estés listo.</span>
+            <!-- Save button moved to map controls. Use the map 'Guardar todo' button to trigger save. -->
+            <span style="color:#666;font-size:14px;">Usa el botón "Guardar todo" en el mapa para persistir trazos y marcadores.</span>
         </div>
         <div id="tramos-info"></div>
     `;
@@ -47,6 +52,31 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     const tramosMap = new TramosMap(map, document.getElementById('tramos-info'));
     if (Array.isArray(tramos) && tramos.length) tramos.forEach(t => tramosMap.addTramo(t));
+    // Cargar marcadores iniciales (si vienen del backend)
+    try {
+        if (Array.isArray(marcadores) && marcadores.length) {
+            console.debug('Cargando marcadores iniciales:', marcadores);
+            marcadores.forEach(m => {
+                // Normalizar posibles claves en distintos idiomas/formatos
+                const norm = {
+                    nombre: m.name || m.nombre || '',
+                    descripcion: m.description || m.descripcion || '',
+                    lat: Number(m.lat ?? m.latitude ?? 0),
+                    lng: Number(m.lng ?? m.lon ?? m.longitude ?? 0),
+                    tipo: m.type || m.tipo || 'pin',
+                    createdAt: m.createdAt || m.created_at || new Date().toISOString()
+                };
+                // Sólo agregar si lat/lng parecen válidos
+                if (!Number.isFinite(norm.lat) || !Number.isFinite(norm.lng) || (norm.lat === 0 && norm.lng === 0)) {
+                    console.warn('Marcador omitido por lat/lng inválidos:', m);
+                    return;
+                }
+                tramosMap.addMarker(norm);
+            });
+        }
+    } catch (e) {
+        console.error('Error cargando marcadores iniciales', e);
+    }
 
     function computeProjectSummary(tramosList) {
             const total_tramos = Array.isArray(tramosList) ? tramosList.length : 0;
@@ -73,12 +103,10 @@ document.addEventListener('DOMContentLoaded', async () => {
             };
     }
 
-    document.getElementById('save-tramos').onclick = async () => {
-        const btn = document.getElementById('save-tramos');
-        const originalText = btn.innerText;
-        btn.disabled = true;
-        btn.innerText = 'Guardando...';
-
+    // Expose a save handler that can be triggered by the map control via CustomEvent 'tramos:save'
+    async function performSave() {
+        // dispatch event to inform UI we're saving
+        document.dispatchEvent(new CustomEvent('tramos:saving'));
         const nuevosTramos = tramosMap.getTramos();
         // asegurarnos de que cada tramo tenga su distancia calculada antes de enviar
         const enhancedTramos = (nuevosTramos || []).map(t => {
@@ -94,7 +122,20 @@ document.addEventListener('DOMContentLoaded', async () => {
         });
 
         const summary = computeProjectSummary(enhancedTramos);
-        if (isCreate) {
+    const marcadores = tramosMap.getMarkers ? tramosMap.getMarkers() : [];
+    // DEBUG: log what we are sending so we can verify markers exist
+    try { console.debug('Saving payload: tramos=', nuevosTramos, 'marcadores=', marcadores); } catch(e) {}
+        // Normalize marker objects to expected shape
+        const normalizedMarkers = (Array.isArray(marcadores) ? marcadores : []).map(m => ({
+            type: m.tipo || m.type || 'pin',
+            name: m.nombre || m.name || '',
+            description: m.descripcion || m.description || '',
+            lat: Number(m.lat) || 0,
+            lng: Number(m.lng) || 0,
+            createdAt: m.createdAt || new Date().toISOString()
+        }));
+        const marcadoresCount = normalizedMarkers.length;
+    if (isCreate) {
             const nombreVal = document.getElementById('project-name').value.trim();
             if (!nombreVal) {
                 btn.disabled = false;
@@ -105,15 +146,17 @@ document.addEventListener('DOMContentLoaded', async () => {
                 // Crear proyecto en backend (tu endpoint POST /api/proyectos)
                 const payload = {
                     nombre: nombreVal,
-                    json: { trazos: enhancedTramos },
+                    json: { trazos: enhancedTramos, marcadores: normalizedMarkers },
                     summary,
                     distancia: summary.total_distancia_km || 0,
                     rutas: summary.total_tramos || 0,
-                    marcadores: summary.total_puntos || 0
+                    marcadores: marcadoresCount || 0
                 };
                 const data = await createProyecto(payload);
                 if (data) {
                     alert('Proyecto creado correctamente');
+                    // notify UI that save finished successfully
+                    document.dispatchEvent(new CustomEvent('tramos:saved', { detail: { success: true } }));
                     // buscar id en varias propiedades posibles que el backend pueda devolver
                     const newId = data.proyectosID || data.proyectosId || data.id || data.proyectoID || data.idProyecto || (data.proyecto && data.proyecto.proyectosID);
                     if (newId) {
@@ -129,9 +172,8 @@ document.addEventListener('DOMContentLoaded', async () => {
                 console.error('Create project failed', e);
                 alert('Error al crear el proyecto: ' + (e.message || e));
             } finally {
-                // si no redirigimos, re-habilitar
-                btn.disabled = false;
-                btn.innerText = originalText;
+                // dispatch saved/failed event to notify UI
+                document.dispatchEvent(new CustomEvent('tramos:saved', { detail: { success: false } }));
             }
         } else {
             try {
@@ -139,14 +181,17 @@ document.addEventListener('DOMContentLoaded', async () => {
                 // enviar trazos en top-level para que el servicio los encuentre como "trazos"
                 const payload = {
                     trazos: enhancedTramos,
+                    marcadores: normalizedMarkers,
                     summary,
                     distancia: summary.total_distancia_km || 0,
                     rutas: summary.total_tramos || 0,
-                    marcadores: summary.total_puntos || 0
+                    marcadoresCount: marcadoresCount || 0
                 };
                 const data = await updateTrazado(root.dataset.id, payload);
                 if (data) {
                     alert('Trazos guardados correctamente');
+                    // inform UI and then reload
+                    document.dispatchEvent(new CustomEvent('tramos:saved', { detail: { success: true } }));
                     window.location.reload();
                     return;
                 }
@@ -154,11 +199,15 @@ document.addEventListener('DOMContentLoaded', async () => {
                 console.error('Save trazado failed', e);
                 alert('Error al guardar los trazos: ' + (e.message || e));
             } finally {
-                btn.disabled = false;
-                btn.innerText = originalText;
+                document.dispatchEvent(new CustomEvent('tramos:saved', { detail: { success: false } }));
             }
         }
-    };
+    }
+
+    // Listen for external save triggers from the map (button dispatches 'tramos:save')
+    document.addEventListener('tramos:save', (e) => {
+        performSave();
+    });
 });
 
 // Estilos básicos
