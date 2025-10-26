@@ -100,8 +100,8 @@ const modalHtml = `
 `;
 
 export function abrirModalTrazo(puntos, onSave) {
-  // Evita duplicados
   if (document.getElementById('modal-trazo-bg')) return;
+  window.__interactionLock = true;
   document.body.insertAdjacentHTML('beforeend', modalHtml);
   const form = document.getElementById('form-trazo');
   form.distancia.value = calcularDistancia(puntos);
@@ -125,16 +125,50 @@ export function abrirModalTrazo(puntos, onSave) {
       buffer: parseInt(form.buffer.value) || 0,
       puntos: Array.isArray(puntos) ? puntos.slice() : []
     };
-    // Si se proporcionó un callback, úsalo para notificar al llamador
     if (typeof onSave === 'function') {
       onSave(nuevo);
+      logStep('Guardar trazo', nuevo.nombre);
     } else {
-      // Compatibilidad: guardar en arreglo global
       trazos.push(nuevo);
+      logStep('Guardar trazo', nuevo.nombre);
       alert('Tramo guardado correctamente');
     }
     cerrarModalTramo();
   };
+  // Listener para cerrar con click en fondo
+  const bg = document.getElementById('modal-trazo-bg');
+  if (bg) {
+    bg.onclick = function() { cerrarModalTramo(); };
+  }
+  // Listener para cerrar con la X (si existe)
+  const closeBtn = document.querySelector('#modal-trazo .close, #modal-trazo .btn-close');
+  if (closeBtn) {
+    closeBtn.onclick = function() { cerrarModalTramo(); };
+  }
+  // Listener para botón eliminar
+  setTimeout(() => {
+    const actions = document.querySelector('#modal-trazo .modal-actions');
+    if (actions && window.__trazoOnDelete && !document.getElementById('__delete_trazo_btn')) {
+      const deleteBtn = document.createElement('button');
+      deleteBtn.type = 'button';
+      deleteBtn.className = 'btn-cancel';
+      deleteBtn.id = '__delete_trazo_btn';
+      deleteBtn.style.marginLeft = '8px';
+      deleteBtn.textContent = 'Eliminar';
+      deleteBtn.onclick = function() {
+        if (typeof window.__trazoOnDelete === 'function') {
+          window.__trazoOnDelete();
+        }
+        cerrarModalTramo();
+      };
+      actions.appendChild(deleteBtn);
+    }
+  }, 30);
+  // MODIFICACIÓN: Cambia el texto del botón de guardar en el modal de trazo
+  const saveBtn = document.querySelector('#modal-trazo .btn-save');
+  if (saveBtn) {
+    saveBtn.textContent = 'Guardar trazo';
+  }
   window.cerrarModalTramo = cerrarModalTramo;
 }
 export function cerrarModalTramo() {
@@ -142,9 +176,11 @@ export function cerrarModalTramo() {
   const modal = document.getElementById('modal-trazo');
   if (bg) bg.remove();
   if (modal) modal.remove();
-  // clear global interaction lock if any
-  try { window.__interactionLock = false; } catch(e) {}
+  window.__trazoOnDelete = null;
+  window.__trazoInitial = null;
+  window.__interactionLock = false;
 }
+
 
 // --- Modal para marcadores ---
 const modalMarcadorHtml = `
@@ -175,8 +211,11 @@ const modalMarcadorHtml = `
 </div>
 `;
 
+// --- MODIFICACIÓN: Eliminar el botón extra de eliminar en el modal de marcador ---
+// En abrirModalMarcador, solo agregar el botón si no existe ya y si window.__marcadorOnDelete está definido
 export function abrirModalMarcador(latlng, onSave) {
   if (document.getElementById('modal-marcador-bg')) return;
+  window.__interactionLock = true;
   document.body.insertAdjacentHTML('beforeend', modalMarcadorHtml);
   const form = document.getElementById('form-marcador');
   form.latlng.value = `${latlng.lat.toFixed(6)}, ${latlng.lng.toFixed(6)}`;
@@ -195,38 +234,46 @@ export function abrirModalMarcador(latlng, onSave) {
       createdAt: (new Date()).toISOString()
     };
     if (typeof onSave === 'function') onSave(nuevo);
+    logStep('Guardar marcador', nuevo.nombre);
     cerrarModalMarcador();
   };
-  // provide a delete button hook if caller provided window.__marcadorOnDelete
-  const deleteBtn = document.createElement('button');
-  deleteBtn.type = 'button';
-  deleteBtn.className = 'btn-cancel';
-  deleteBtn.style.marginLeft = '8px';
-  deleteBtn.textContent = 'Eliminar';
-  deleteBtn.onclick = function() {
-    if (typeof window.__marcadorOnDelete === 'function') {
-      window.__marcadorOnDelete();
-    }
-    cerrarModalMarcador();
-  };
-  // append delete button next to cancel if delete hook exists
+  // SOLO agregar botón eliminar si window.__marcadorOnDelete existe y no hay ya un botón
   setTimeout(() => {
     const actions = document.querySelector('#modal-marcador .modal-actions');
-    if (actions && window.__marcadorOnDelete) actions.appendChild(deleteBtn);
+    if (actions && window.__marcadorOnDelete && !document.getElementById('__delete_marcador_btn')) {
+      const deleteBtn = document.createElement('button');
+      deleteBtn.type = 'button';
+      deleteBtn.className = 'btn-cancel';
+      deleteBtn.id = '__delete_marcador_btn';
+      deleteBtn.style.marginLeft = '8px';
+      deleteBtn.textContent = 'Eliminar';
+      deleteBtn.onclick = function() {
+        if (typeof window.__marcadorOnDelete === 'function') {
+          window.__marcadorOnDelete();
+        }
+        cerrarModalMarcador();
+      };
+      actions.appendChild(deleteBtn);
+    }
   }, 30);
   window.cerrarModalMarcador = cerrarModalMarcador;
 }
 export function cerrarModalMarcador() {
-  // notify any onClose hook (used to release interaction locks)
   try { if (typeof window.__marcadorOnClose === 'function') window.__marcadorOnClose(); } catch(e) {}
   const bg = document.getElementById('modal-marcador-bg');
   const modal = document.getElementById('modal-marcador');
   if (bg) bg.remove();
   if (modal) modal.remove();
-  // clear temporary globals
   window.__marcadorInitial = null;
   window.__marcadorOnClose = null;
   window.__marcadorOnDelete = null;
+  // Libera el lock SIEMPRE
+  window.__interactionLock = false;
+  // Elimina botón flotante si existe
+  if (window.__tramosMapInstance && window.__tramosMapInstance._deleteBtn) {
+    try { window.__tramosMapInstance._deleteBtn.remove(); } catch(e){}
+    window.__tramosMapInstance._deleteBtn = null;
+  }
 }
 
 
@@ -237,33 +284,70 @@ export class TramosMap {
     this.infoDiv = infoDiv;
     this.tramos = [];
     this.marcadores = [];
-    this._markerLayers = []; // store Leaflet marker instances parallel to marcadores
-  this._placingMarker = false;
-    this._markerType = 'pin'; // default marker type
-  this._interactionLock = false; // when true, prevent other popups/modals from opening
+    this._markerLayers = [];
+    this._placingMarker = false;
+    this._markerType = 'pin';
+    this._interactionLock = false;
     this.currentPoints = [];
     this.currentLine = null;
     this.lines = [];
     this.drawing = false;
     this._toggleBtn = null;
     this._finishBtn = null;
+    this._deleteBtn = null;
+    window.__tramosMapInstance = this;
+    this._baseLayerAdded = false;
     this._setupMap();
+    this._addBaseLayerControl();
     this._addControls();
     this._setupGuardarListeners();
     this._renderInfo();
+  }
+
+  // Agrega el selector de tipo de mapa (callejero/satélite) solo una vez
+  _addBaseLayerControl() {
+    if (this._baseLayerAdded) return;
+    // Define los mapas base
+    const callejero = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '© OpenStreetMap'
+    });
+    const satelite = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+      attribution: '© Esri & contributors',
+      maxZoom: 22, // permite acercar más
+      maxNativeZoom: 19 // evita error "map data not yet available"
+    });
+    // Si el mapa no tiene capas, agrega la callejera por defecto
+    if (this.map && this.map._layers && Object.keys(this.map._layers).length === 0) {
+      callejero.addTo(this.map);
+    }
+    const baseLayers = {
+      'Callejero': callejero,
+      'Satélite': satelite
+    };
+    L.control.layers(baseLayers, null, { position: 'topright', collapsed: false }).addTo(this.map);
+    this._baseLayerAdded = true;
   }
 
   _setupMap() {
     // Click-to-add: when drawing, clicks add fixed points; mousemove shows preview
   this.map.on('click', (e) => {
       // Marker placement takes precedence when enabled
-      if (this._placingMarker) {
+  if (this._placingMarker) {
         const latlng = e.latlng;
         if (this._interactionLock) return; // avoid overlapping interactions
   this._interactionLock = true;
   this._updateGuardarButton();
   // ensure modal close hook restores lock and UI (keep placing active)
-  try { window.__marcadorOnClose = () => { this._interactionLock = false; this._updateGuardarButton(); if (this._addMarkerBtn) this._addMarkerBtn.innerText = this._placingMarker ? 'Cancelar marcador' : 'Agregar marcador'; if (this.map && this.map.getContainer) this.map.getContainer().style.cursor = this._placingMarker ? 'crosshair' : ''; }; } catch(e) {}
+  try { window.__marcadorOnClose = () => {
+        this._interactionLock = false;
+        this._updateGuardarButton();
+        if (this._addMarkerBtn) {
+          this._addMarkerBtn.innerText = this._placingMarker ? 'Cancelar marcador' : 'Agregar marcador';
+        }
+        if (this.map && this.map.getContainer) {
+          this.map.getContainer().style.cursor = this._placingMarker ? 'crosshair' : '';
+        }
+      }; } catch(e) {}
   // abrir modal para nombre/descripcion
   abrirModalMarcador(latlng, (nuevo) => {
           // attach tipo seleccionado
@@ -274,18 +358,14 @@ export class TramosMap {
         });
         // keep placing mode active so user can add multiple markers
         // ensure UI/cursor reflect current placing state
-        if (this._addMarkerBtn) this._addMarkerBtn.innerText = this._placingMarker ? 'Cancelar marcador' : 'Agregar marcador';
-        if (this.map && this.map.getContainer) this.map.getContainer().style.cursor = this._placingMarker ? 'crosshair' : '';
+        if (this._addMarkerBtn) this._addMarkerBtn.innerText = 'Cancelar marcador';
+        if (this.map && this.map.getContainer) this.map.getContainer().style.cursor = 'crosshair';
         return;
       }
   if (!this.drawing) return;
       const { lat, lng } = e.latlng;
       this.currentPoints.push([lat, lng]);
-      // redraw current line with fixed points only; preview handled in mousemove
-      if (this.currentLine) this.map.removeLayer(this.currentLine);
-      if (this.currentPoints.length > 0) {
-        this.currentLine = L.polyline(this.currentPoints, { color: '#2563eb', weight: 4 }).addTo(this.map);
-      }
+      this._redrawCurrentLine();
       this._updateFinishBtnVisibility();
     });
 
@@ -297,15 +377,87 @@ export class TramosMap {
       if (!this.currentPoints.length) return;
       const latlng = e.latlng;
       const previewPoints = this.currentPoints.concat([[latlng.lat, latlng.lng]]);
-      // replace preview line
       if (this._previewLine) this.map.removeLayer(this._previewLine);
       this._previewLine = L.polyline(previewPoints, { color: '#60a5fa', weight: 3, dashArray: '6,4' }).addTo(this.map);
+      this.updateDistanceLabel(previewPoints);
     });
+  }
+
+  redrawCurrentLine() {
+    if (this.currentLine) this.map.removeLayer(this.currentLine);
+    this.removePointMarkers();
+    if (this.currentPoints.length > 0) {
+      this.currentLine = L.polyline(this.currentPoints, { color: '#2563eb', weight: 4 }).addTo(this.map);
+      this.updateDistanceLabel(this.currentPoints);
+      // Marcadores editables para cada punto
+      this._pointMarkers = this.currentPoints.map((pt, idx) => {
+        const marker = L.circleMarker(pt, { radius: 7, color: '#2563eb', fillColor: '#fff', fillOpacity: 1, weight: 2 }).addTo(this.map);
+        marker.on('mousedown', (ev) => {
+          marker.dragging.enable();
+        });
+        marker.on('drag', (ev) => {
+          const pos = marker.getLatLng();
+          this.currentPoints[idx] = [pos.lat, pos.lng];
+          this.redrawCurrentLine();
+        });
+        marker.on('mouseup', (ev) => {
+          marker.dragging.disable();
+        });
+        marker.on('contextmenu', (ev) => {
+          // Eliminar punto con click derecho si hay al menos 3
+          if (this.currentPoints.length > 2) {
+            this.currentPoints.splice(idx, 1);
+            this.redrawCurrentLine();
+          }
+        });
+        marker.on('dblclick', (ev) => {
+          // Agregar punto entre este y el siguiente
+          if (idx < this.currentPoints.length - 1) {
+            const next = this.currentPoints[idx + 1];
+            const lat = (pt[0] + next[0]) / 2;
+            const lng = (pt[1] + next[1]) / 2;
+            this.currentPoints.splice(idx + 1, 0, [lat, lng]);
+            this.redrawCurrentLine();
+          }
+        });
+        return marker;
+      });
+    }
+  }
+
+  removePointMarkers() {
+    if (Array.isArray(this._pointMarkers)) {
+      this._pointMarkers.forEach(m => { try { this.map.removeLayer(m); } catch(e){} });
+    }
+    this._pointMarkers = [];
+  }
+
+  updateDistanceLabel(points) {
+    const dist = calcularDistancia(points || []);
+    if (!this._distanceLabel) {
+      this._distanceLabel = L.control({position: 'topright'});
+      this._distanceLabel.onAdd = function(map) {
+        const div = L.DomUtil.create('div', 'leaflet-bar');
+        div.id = '__dist_label';
+        div.style.background = '#fff';
+        div.style.padding = '6px 12px';
+        div.style.borderRadius = '6px';
+        div.style.boxShadow = '0 2px 8px #0002';
+        div.style.fontWeight = 'bold';
+        div.style.fontSize = '15px';
+        div.innerHTML = `Distancia: <span id="__dist_val">${dist} km</span>`;
+        return div;
+      };
+      this._distanceLabel.addTo(this.map);
+    } else {
+      const el = document.getElementById('__dist_val');
+      if (el) el.textContent = `${dist} km`;
+    }
   }
 
   _addControls() {
     const self = this;
-  const control = L.control({ position: 'bottomright' });
+    const control = L.control({ position: 'bottomright' });
     control.onAdd = function(map) {
       const container = L.DomUtil.create('div', 'leaflet-bar leaflet-control custom-tramos-control');
       container.style.display = 'flex';
@@ -313,7 +465,8 @@ export class TramosMap {
       container.style.gap = '6px';
       container.style.padding = '6px';
 
-  const toggle = document.createElement('button');
+      // Botón principal para dibujar
+      const toggle = document.createElement('button');
       toggle.type = 'button';
       toggle.title = 'Activar modo dibujo';
       toggle.innerText = 'Dibujar';
@@ -323,26 +476,35 @@ export class TramosMap {
       toggle.style.border = 'none';
       toggle.style.borderRadius = '4px';
       toggle.style.cursor = 'pointer';
+      self._toggleBtn = toggle;
 
-  const finish = document.createElement('button');
+      // Botón para terminar trazo
+      const finish = document.createElement('button');
       finish.type = 'button';
-      finish.title = 'Terminar trazo';
-      finish.innerText = 'Terminar';
+      finish.title = 'Guardar trazo';
+      finish.innerText = 'Guardar trazo';
       finish.style.padding = '6px 8px';
-      finish.style.background = '#10b981';
+      finish.style.background = '#16a34a';
       finish.style.color = '#fff';
       finish.style.border = 'none';
       finish.style.borderRadius = '4px';
       finish.style.cursor = 'pointer';
       finish.style.display = 'none';
-
-      toggle.onclick = function(ev) {
-        ev.stopPropagation();
-        if (!self.drawing) self.enableDrawing(); else self.disableDrawing();
-      };
+      self._finishBtn = finish;
       finish.onclick = function(ev) {
         ev.stopPropagation();
         self.finishTramo();
+      };
+
+      toggle.onclick = function(ev) {
+        ev.stopPropagation();
+        if (!self.drawing) {
+          self.enableDrawing();
+          self._finishBtn.style.display = 'inline-block';
+        } else {
+          self.disableDrawing();
+          self._finishBtn.style.display = 'none';
+        }
       };
 
       container.appendChild(toggle);
@@ -450,6 +612,25 @@ export class TramosMap {
       self._guardarBtn = guardarBtn;
       container.appendChild(guardarBtn);
 
+      // Agregar selector de tipo de mapa (base layer)
+      // Usar correctamente la instancia del mapa (cerradura `self`) y evitar duplicados
+      if (!self._baseLayerAdded) {
+        const baseLayers = {
+          "Callejero": L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '© OpenStreetMap contributors'
+          }),
+          "Satélite": L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+            attribution: '© Esri & contributors',
+            maxZoom: 22, // permite acercar más
+            maxNativeZoom: 19 // evita error "map data not yet available"
+          })
+        };
+        // Añadir la capa base por defecto si aún no existe
+        baseLayers["Callejero"].addTo(self.map);
+        L.control.layers(baseLayers, null, { position: 'topright', collapsed: false }).addTo(self.map);
+        self._baseLayerAdded = true;
+      }
+
       // Prevenir que el control interfiera con el mapa (panning)
       L.DomEvent.disableClickPropagation(container);
       L.DomEvent.disableScrollPropagation(container);
@@ -528,19 +709,18 @@ export class TramosMap {
       markerObj.openPopup();
     });
     markerObj.on('dblclick', (ev) => {
-  if (this._interactionLock) return;
-  this._interactionLock = true;
-  this._updateGuardarButton();
-      // prepare edit: prefill modal and provide delete hook
+      if (this._interactionLock) return;
+      this._interactionLock = true;
+      this._updateGuardarButton();
       window.__marcadorInitial = Object.assign({}, plain);
       window.__marcadorOnDelete = () => {
-        // remove marker and data
         const idx = this._markerLayers.indexOf(markerObj);
         if (idx !== -1) {
           this.map.removeLayer(this._markerLayers[idx]);
           this._markerLayers.splice(idx, 1);
           this.marcadores.splice(idx, 1);
           this._renderInfo();
+          logStep('Eliminar marcador', plain.nombre);
         }
         try { _showToast('Marcador eliminado'); } catch(e) {}
         window.__marcadorOnDelete = null;
@@ -548,10 +728,17 @@ export class TramosMap {
         this._interactionLock = false;
         this._updateGuardarButton();
       };
-  // set close hook so cancel/delete release locks and UI
-  try { window.__marcadorOnClose = () => { this._interactionLock = false; this._updateGuardarButton(); if (this._addMarkerBtn) this._addMarkerBtn.innerText = this._placingMarker ? 'Cancelar marcador' : 'Agregar marcador'; if (this.map && this.map.getContainer) this.map.getContainer().style.cursor = this._placingMarker ? 'crosshair' : ''; }; } catch(e) {}
-  abrirModalMarcador({lat: plain.lat, lng: plain.lng}, (nuevo) => {
-        // update plain object and popup
+      try { window.__marcadorOnClose = () => {
+        this._interactionLock = false;
+        this._updateGuardarButton();
+        if (this._addMarkerBtn) {
+          this._addMarkerBtn.innerText = this._placingMarker ? 'Cancelar marcador' : 'Agregar marcador';
+        }
+        if (this.map && this.map.getContainer) {
+          this.map.getContainer().style.cursor = this._placingMarker ? 'crosshair' : '';
+        }
+      }; } catch(e) {}
+      abrirModalMarcador({lat: plain.lat, lng: plain.lng}, (nuevo) => {
         plain.nombre = nuevo.nombre;
         plain.descripcion = nuevo.descripcion;
         plain.lat = nuevo.lat;
@@ -559,6 +746,7 @@ export class TramosMap {
         markerObj.setLatLng([nuevo.lat, nuevo.lng]);
         markerObj.setPopupContent(`<b>${nuevo.nombre}</b><br/>${nuevo.descripcion || ''}`);
         this._renderInfo();
+        logStep('Editar marcador', nuevo.nombre);
         try { _showToast('Marcador actualizado'); } catch(e) {}
         window.__marcadorOnDelete = null;
         window.__marcadorInitial = null;
@@ -569,6 +757,77 @@ export class TramosMap {
 
     this._renderInfo();
     return markerObj;
+  }
+
+  // MODIFICACIÓN: Eliminar el botón flotante y agregar el botón eliminar solo dentro del modal
+  // En abrirModalTrazo, agrega el botón eliminar solo si window.__trazoOnDelete existe
+  abrirModalTrazo(puntos, onSave) {
+    // Evita duplicados
+    if (document.getElementById('modal-trazo-bg')) return;
+    window.__interactionLock = true;
+    document.body.insertAdjacentHTML('beforeend', modalHtml);
+    const form = document.getElementById('form-trazo');
+    form.distancia.value = calcularDistancia(puntos);
+    // Si se pasa un objeto inicial en window.__trazoInitial (hack-light), rellenar campos
+    const initial = window.__trazoInitial || null;
+    if (initial) {
+      if (initial.nombre) form.nombre.value = initial.nombre;
+      if (initial.descripcion) form.descripcion.value = initial.descripcion;
+      if (initial.color) form.color.value = initial.color;
+      if (initial.hilos) form.hilos.value = initial.hilos;
+      if (initial.buffer) form.buffer.value = initial.buffer;
+    }
+    form.onsubmit = function(e) {
+      e.preventDefault();
+      const nuevo = {
+        nombre: form.nombre.value,
+        descripcion: form.descripcion.value,
+        color: form.color.value,
+        distancia: parseFloat(form.distancia.value) || 0,
+        hilos: parseInt(form.hilos.value) || 1,
+        buffer: parseInt(form.buffer.value) || 0,
+        puntos: Array.isArray(puntos) ? puntos.slice() : []
+      };
+      // Si se proporcionó un callback, úsalo para notificar al llamador
+      if (typeof onSave === 'function') {
+        onSave(nuevo);
+      } else {
+        // Compatibilidad: guardar en arreglo global
+        trazos.push(nuevo);
+        alert('Tramo guardado correctamente');
+      }
+      cerrarModalTramo();
+    };
+    // Listener para cerrar con click en fondo
+    const bg = document.getElementById('modal-trazo-bg');
+    if (bg) {
+      bg.onclick = function() { cerrarModalTramo(); };
+    }
+    // Listener para cerrar con la X (si existe)
+    const closeBtn = document.querySelector('#modal-trazo .close, #modal-trazo .btn-close');
+    if (closeBtn) {
+      closeBtn.onclick = function() { cerrarModalTramo(); };
+    }
+    // Listener para botón eliminar
+    setTimeout(() => {
+      const actions = document.querySelector('#modal-trazo .modal-actions');
+      if (actions && window.__trazoOnDelete && !document.getElementById('__delete_trazo_btn')) {
+        const deleteBtn = document.createElement('button');
+        deleteBtn.type = 'button';
+        deleteBtn.className = 'btn-cancel';
+        deleteBtn.id = '__delete_trazo_btn';
+        deleteBtn.style.marginLeft = '8px';
+        deleteBtn.textContent = 'Eliminar';
+        deleteBtn.onclick = function() {
+          if (typeof window.__trazoOnDelete === 'function') {
+            window.__trazoOnDelete();
+          }
+          cerrarModalTramo();
+        };
+        actions.appendChild(deleteBtn);
+      }
+    }, 30);
+    window.cerrarModalTramo = cerrarModalTramo;
   }
 
   // Enable/disable marker dragging and update JSON on dragend
@@ -629,7 +888,7 @@ export class TramosMap {
 
   finishTramo() {
     if (this.currentPoints.length <= 1) return alert('Agrega al menos dos puntos para crear un trazo');
-    // Finalizar trazo (no abrir modal automáticamente). El trazo queda en lista y en mapa.
+    // Finalizar trazo y limpiar overlays
     const nuevo = {
       nombre: 'Sin nombre',
       descripcion: '',
@@ -639,15 +898,27 @@ export class TramosMap {
       buffer: 0,
       puntos: this.currentPoints.slice() || []
     };
-    this.addTramo(nuevo);
-    // Reset estado de dibujo
-    if (this.currentLine) {
-      this.map.removeLayer(this.currentLine);
-      this.currentLine = null;
-    }
-    this.currentPoints = [];
-    if (this._previewLine) { this.map.removeLayer(this._previewLine); this._previewLine = null; }
-    this._updateFinishBtnVisibility();
+    // MODIFICACIÓN: Mostrar modal para agregar nombre, descripción, etc. antes de guardar
+    this._interactionLock = true;
+    window.__trazoInitial = { ...nuevo };
+    abrirModalTrazo(this.currentPoints, (datos) => {
+      // Guardar la info del popup en el trazo
+      this.addTramo(datos);
+      logStep('Agregar trazo', JSON.stringify(datos));
+      this._interactionLock = false;
+      this.disableDrawing();
+      _showToast('Tramo guardado: ' + datos.nombre);
+    });
+    // Si cancela el modal, también cancelar el dibujado
+    window.cerrarModalTramo = () => {
+      const bg = document.getElementById('modal-trazo-bg');
+      const modal = document.getElementById('modal-trazo');
+      if (bg) bg.remove();
+      if (modal) modal.remove();
+      window.__trazoInitial = null;
+      this._interactionLock = false;
+      this.disableDrawing();
+    };
   }
 
   // Mousedown/mousemove/mouseup behavior for press-and-draw
@@ -711,22 +982,31 @@ export class TramosMap {
       const info = `<b>${safe.nombre}</b><br/>${safe.descripcion || ''}<br/>${(safe.distancia||0)} km`;
       poly.bindPopup(info).openPopup();
     });
-    poly.on('dblclick', () => {
-      if (this._interactionLock) return;
-      this._interactionLock = true;
-      // prefills via global temp object
+    poly.on('dblclick', (ev) => {
+      if (window.__interactionLock) return;
+      window.__interactionLock = true;
       window.__trazoInitial = { ...safe };
+      window.__trazoOnDelete = () => {
+        this.map.removeLayer(poly);
+        const idx = this.tramos.indexOf(safe);
+        if (idx !== -1) this.tramos.splice(idx, 1);
+        this._renderInfo();
+        logStep('Eliminar trazo', safe.nombre);
+        window.__trazoInitial = null;
+        window.__trazoOnDelete = null;
+        window.__interactionLock = false;
+        this._updateGuardarButton();
+      };
       abrirModalTrazo(tramo.puntos, (nuevo) => {
-        // actualizar datos en memoria y en la polyline
-        const idx = this.tramos.indexOf(tramo);
+        const idx = this.tramos.indexOf(safe);
         if (idx !== -1) this.tramos[idx] = Object.assign({}, nuevo);
-        // actualizar polyline color and popup/info
         poly.setStyle({ color: nuevo.color || '#2563eb' });
         this._renderInfo();
-  // limpiar
-  window.__trazoInitial = null;
-  this._interactionLock = false;
-  this._updateGuardarButton();
+        logStep('Editar trazo', nuevo.nombre);
+        window.__trazoInitial = null;
+        window.__trazoOnDelete = null;
+        window.__interactionLock = false;
+        this._updateGuardarButton();
       });
     });
     this.lines.push(poly);
@@ -745,4 +1025,26 @@ export class TramosMap {
     const marcadoresHtml = this.marcadores.length ? `<br/><b>Marcadores:</b> ${this.marcadores.length}` : '';
     this.infoDiv.innerHTML = '<b>Trazos guardados:</b><br>' + trazosHtml + marcadoresHtml;
   }
+}
+
+// --- MODIFICACIÓN: Agrega registro de pasos de usuario en la parte inferior ---
+function logStep(action, detail = '') {
+  let logDiv = document.getElementById('__tramos_steps_log');
+  if (!logDiv) {
+    logDiv = document.createElement('div');
+    logDiv.id = '__tramos_steps_log';
+    logDiv.style.marginTop = '24px';
+    logDiv.style.padding = '12px';
+    logDiv.style.background = '#f3f4f6';
+    logDiv.style.borderRadius = '8px';
+    logDiv.style.fontSize = '15px';
+    logDiv.innerHTML = '<b>Pasos recientes:</b><ul id="__tramos_steps_list" style="margin:8px 0 0 0;padding-left:18px;"></ul>';
+    document.body.appendChild(logDiv);
+  }
+  const ul = document.getElementById('__tramos_steps_list');
+  const li = document.createElement('li');
+  li.textContent = `${new Date().toLocaleTimeString()} - ${action}${detail ? ': ' + detail : ''}`;
+  ul.appendChild(li);
+  // Solo muestra los últimos 8 pasos
+  while (ul.children.length > 8) ul.removeChild(ul.firstChild);
 }
