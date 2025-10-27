@@ -608,7 +608,6 @@ export class TramosMap {
         // Dispatch an event that the page-level save handler listens for
         document.dispatchEvent(new CustomEvent('tramos:save'));
       };
-      // Keep a reference for enabling/disabling when interaction lock changes
       self._guardarBtn = guardarBtn;
       container.appendChild(guardarBtn);
 
