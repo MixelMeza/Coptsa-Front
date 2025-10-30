@@ -216,20 +216,71 @@ export async function mountProjectsList(root) {
     b.textContent = 'No se pudo contactar la API o no hay datos. Mostrando datos simulados.';
     root.appendChild(b);
   }
+
+  // --- Paginación ---
+  const PAGE_SIZE = 10;
+  let currentPage = 1;
+  let filtered = proyectos.slice();
+
   const search = document.createElement('input');
   search.id = 'projects-search';
   search.placeholder = 'Buscar por nombre o ID';
   search.style.display = 'block';
   search.style.marginBottom = '8px';
   root.appendChild(search);
-  let current = proyectos.slice();
-  let table = makeTable(current);
+
+  const paginationDiv = document.createElement('div');
+  paginationDiv.style.display = 'flex';
+  paginationDiv.style.justifyContent = 'center';
+  paginationDiv.style.alignItems = 'center';
+  paginationDiv.style.gap = '8px';
+  paginationDiv.style.margin = '12px 0';
+  root.appendChild(paginationDiv);
+
+  function getPageItems() {
+    const start = (currentPage - 1) * PAGE_SIZE;
+    return filtered.slice(start, start + PAGE_SIZE);
+  }
+
+  let table = makeTable(getPageItems());
   root.appendChild(table);
 
-  function refreshTable(newItems) {
-    const newTable = makeTable(newItems);
+  function renderPagination() {
+    paginationDiv.innerHTML = '';
+    const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+    const prevBtn = document.createElement('button');
+    prevBtn.textContent = 'Anterior';
+    prevBtn.disabled = currentPage === 1;
+    prevBtn.onclick = () => {
+      if (currentPage > 1) {
+        currentPage--;
+        refreshTable();
+      }
+    };
+    const nextBtn = document.createElement('button');
+    nextBtn.textContent = 'Siguiente';
+    nextBtn.disabled = currentPage === totalPages;
+    nextBtn.onclick = () => {
+      if (currentPage < totalPages) {
+        currentPage++;
+        refreshTable();
+      }
+    };
+    const pageInfo = document.createElement('span');
+    pageInfo.textContent = `Página ${currentPage} de ${totalPages}`;
+    paginationDiv.appendChild(prevBtn);
+    paginationDiv.appendChild(pageInfo);
+    paginationDiv.appendChild(nextBtn);
+  }
+
+  function refreshTable() {
+    // Si la página actual se queda sin elementos, retroceder una página
+    const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+    if (currentPage > totalPages) currentPage = totalPages;
+    const newTable = makeTable(getPageItems());
     root.replaceChild(newTable, table);
     table = newTable;
+    renderPagination();
     attachListeners();
   }
 
@@ -265,19 +316,23 @@ export async function mountProjectsList(root) {
   }
 
   let debounce = null;
+
   search.addEventListener('input', (e) => {
     const q = String(e.target.value || '').trim().toLowerCase();
     clearTimeout(debounce);
     debounce = setTimeout(() => {
-      if (!q) current = proyectos.slice();
-      else current = proyectos.filter(p => {
+      if (!q) filtered = proyectos.slice();
+      else filtered = proyectos.filter(p => {
         const nombre = String(p.nombre || '').toLowerCase();
         const id = String(p.proyectosID ?? p.id ?? '');
         return nombre.includes(q) || id.includes(q);
       });
-      refreshTable(current);
+      currentPage = 1;
+      refreshTable();
     }, 200);
   });
+
+  renderPagination();
 
   attachListeners();
 }

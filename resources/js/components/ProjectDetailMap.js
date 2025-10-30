@@ -151,6 +151,20 @@ document.addEventListener('DOMContentLoaded', async () => {
         // dispatch event to inform UI we're saving
         document.dispatchEvent(new CustomEvent('tramos:saving'));
         const nuevosTramos = tramosMap.getTramos();
+        // Validaciones de tramos
+        if (!Array.isArray(nuevosTramos) || nuevosTramos.length === 0) {
+            alert('Debe agregar al menos un tramo al proyecto.');
+            document.dispatchEvent(new CustomEvent('tramos:saved', { detail: { success: false } }));
+            return;
+        }
+        // Validar que cada tramo tenga al menos 2 puntos
+        for (const t of nuevosTramos) {
+            if (!Array.isArray(t.puntos) || t.puntos.length < 2) {
+                alert('Cada tramo debe tener al menos 2 puntos.');
+                document.dispatchEvent(new CustomEvent('tramos:saved', { detail: { success: false } }));
+                return;
+            }
+        }
         // asegurarnos de que cada tramo tenga su distancia calculada antes de enviar
         const enhancedTramos = (nuevosTramos || []).map(t => {
             const copia = Object.assign({}, t);
@@ -166,6 +180,21 @@ document.addEventListener('DOMContentLoaded', async () => {
 
         const summary = computeProjectSummary(enhancedTramos);
         const marcadores = tramosMap.getMarkers ? tramosMap.getMarkers() : [];
+        // Validaciones de marcadores
+        if (!Array.isArray(marcadores) || marcadores.length === 0) {
+            if (!confirm('No hay marcadores en el proyecto. ¿Desea continuar?')) {
+                document.dispatchEvent(new CustomEvent('tramos:saved', { detail: { success: false } }));
+                return;
+            }
+        }
+        // Validar que cada marcador tenga lat/lng válidos
+        for (const m of marcadores) {
+            if (!Number.isFinite(Number(m.lat)) || !Number.isFinite(Number(m.lng))) {
+                alert('Todos los marcadores deben tener coordenadas válidas.');
+                document.dispatchEvent(new CustomEvent('tramos:saved', { detail: { success: false } }));
+                return;
+            }
+        }
         // DEBUG: log what we are sending so we can verify markers exist
         try { console.debug('Saving payload: tramos=', nuevosTramos, 'marcadores=', marcadores); } catch(e) {}
         // Normalize marker objects to expected shape
@@ -195,11 +224,18 @@ document.addEventListener('DOMContentLoaded', async () => {
         };
     if (isCreate) {
         const nombreVal = document.getElementById('project-name').value.trim();
+        // Validación de nombre
         if (!nombreVal) {
-            btn.disabled = false;
-            btn.innerText = originalText;
-            return alert('Ingrese el nombre del proyecto');
+            alert('Ingrese el nombre del proyecto');
+            document.dispatchEvent(new CustomEvent('tramos:saved', { detail: { success: false } }));
+            return;
         }
+        if (nombreVal.length < 3) {
+            alert('El nombre del proyecto debe tener al menos 3 caracteres.');
+            document.dispatchEvent(new CustomEvent('tramos:saved', { detail: { success: false } }));
+            return;
+        }
+        // Aquí podrías agregar validación de nombre duplicado si tienes acceso a la lista de proyectos
         try {
             // Crear proyecto en backend (tu endpoint POST /api/proyectos)
             const payload = {
@@ -237,6 +273,20 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
     } else {
         try {
+            // Tomar el nombre actualizado del input
+            const nombreVal = document.getElementById('project-name').value.trim();
+            // Validación de nombre
+            if (!nombreVal) {
+                alert('Ingrese el nombre del proyecto');
+                document.dispatchEvent(new CustomEvent('tramos:saved', { detail: { success: false } }));
+                return;
+            }
+            if (nombreVal.length < 3) {
+                alert('El nombre del proyecto debe tener al menos 3 caracteres.');
+                document.dispatchEvent(new CustomEvent('tramos:saved', { detail: { success: false } }));
+                return;
+            }
+            // Aquí podrías agregar validación de nombre duplicado si tienes acceso a la lista de proyectos
             // Llamar al endpoint PUT /api/proyectos/{id}/trazado que definiste
             // enviar trazos en top-level para que el servicio los encuentre como "trazos"
             const payload = {
@@ -248,8 +298,6 @@ document.addEventListener('DOMContentLoaded', async () => {
             };
             // Use updateProyecto to persist both top-level fields and the JSON payload
             // so the backend saves the `json` column and summary fields in the DB.
-            // Tomar el nombre actualizado del input
-            const nombreVal = document.getElementById('project-name').value.trim();
             const updatePayload = {
                 nombre: nombreVal,
                 json: {
