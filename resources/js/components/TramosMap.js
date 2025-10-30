@@ -36,6 +36,24 @@ function _showToast(msg, timeout = 2800) {
 export const trazos = [];
 export const tramos = trazos;
 
+// --- Persistencia local de trazos ---
+function guardarTrazosLS() {
+  try {
+    localStorage.setItem('trazos', JSON.stringify(trazos));
+  } catch(e) {}
+}
+function cargarTrazosLS() {
+  try {
+    const data = localStorage.getItem('trazos');
+    if (data) {
+      const arr = JSON.parse(data);
+      trazos.length = 0;
+      arr.forEach(t => trazos.push(t));
+    }
+  } catch(e) {}
+}
+cargarTrazosLS();
+
 export function distanciaEntre(a, b) {
   // Haversine
   const R = 6371000;
@@ -87,10 +105,14 @@ const modalHtml = `
     <input name="color" type="color" value="#ff0000" />
     <label>Distancia (km):</label>
     <input name="distancia" type="text" readonly />
-    <label>Número de hilos:</label>
-    <input name="hilos" type="number" min="1" value="1" />
-    <label>Número de buffer:</label>
-    <input name="buffer" type="number" min="0" value="0" />
+    <label>Colores de buffer:</label>
+    <select name="buffers" id="buffers-select" multiple size="6" style="width:100%;margin-bottom:4px;"></select>
+    <div id="buffers-chips" style="margin-bottom:8px;"></div>
+    <label>Colores de hilos:</label>
+    <select name="hilos" id="hilos-select" multiple size="6" style="width:100%;margin-bottom:4px;"></select>
+    <div id="hilos-chips" style="margin-bottom:8px;"></div>
+    <label>Total de hilos:</label>
+    <input name="hilos_total" type="text" readonly value="0" />
     <div class="modal-actions">
       <button type="submit" class="btn-save">Guardar</button>
       <button type="button" class="btn-cancel" onclick="window.cerrarModalTramo && window.cerrarModalTramo()">Cancelar</button>
@@ -100,29 +122,132 @@ const modalHtml = `
 `;
 
 export function abrirModalTrazo(puntos, onSave) {
+  // Chips visuales para buffers y hilos seleccionados
+  function renderChips() {
+    const buffersSelect = document.getElementById('buffers-select');
+    const hilosSelect = document.getElementById('hilos-select');
+    const buffersChips = document.getElementById('buffers-chips');
+    const hilosChips = document.getElementById('hilos-chips');
+    buffersChips.innerHTML = '';
+    hilosChips.innerHTML = '';
+    Array.from(buffersSelect.selectedOptions).forEach(opt => {
+      const chip = document.createElement('span');
+      chip.textContent = opt.textContent;
+      chip.style.display = 'inline-block';
+      chip.style.background = opt.value;
+      chip.style.color = '#fff';
+      chip.style.fontWeight = 'bold';
+      chip.style.padding = '6px 16px';
+      chip.style.margin = '2px 6px 2px 0';
+      chip.style.borderRadius = '16px';
+      chip.style.boxShadow = '0 1px 4px #0002';
+      chip.style.fontSize = '15px';
+      chip.style.border = '2px solid #fff';
+      chip.style.textShadow = '0 1px 2px #0006';
+      buffersChips.appendChild(chip);
+    });
+    Array.from(hilosSelect.selectedOptions).forEach(opt => {
+      const chip = document.createElement('span');
+      chip.textContent = opt.textContent;
+      chip.style.display = 'inline-block';
+      chip.style.background = opt.value;
+      chip.style.color = '#fff';
+      chip.style.fontWeight = 'bold';
+      chip.style.padding = '6px 16px';
+      chip.style.margin = '2px 6px 2px 0';
+      chip.style.borderRadius = '16px';
+      chip.style.boxShadow = '0 1px 4px #0002';
+      chip.style.fontSize = '15px';
+      chip.style.border = '2px solid #fff';
+      chip.style.textShadow = '0 1px 2px #0006';
+      hilosChips.appendChild(chip);
+    });
+  }
   if (document.getElementById('modal-trazo-bg')) return;
   window.__interactionLock = true;
   document.body.insertAdjacentHTML('beforeend', modalHtml);
   const form = document.getElementById('form-trazo');
   form.distancia.value = calcularDistancia(puntos);
+  // Colores estándar de fibra óptica
+  const coloresFibra = [
+    {nombre:'Azul', color:'#1f4fff'},
+    {nombre:'Naranja', color:'#ff7f00'},
+    {nombre:'Verde', color:'#00b140'},
+    {nombre:'Marrón', color:'#a0522d'},
+    {nombre:'Gris', color:'#bdbdbd'},
+    {nombre:'Blanco', color:'#ffffff'},
+    {nombre:'Rojo', color:'#ff0000'},
+    {nombre:'Negro', color:'#000000'},
+    {nombre:'Amarillo', color:'#fff200'},
+    {nombre:'Violeta', color:'#a259e6'},
+    {nombre:'Rosa', color:'#ffb6c1'},
+    {nombre:'Aqua', color:'#00e5e5'}
+  ];
+
+  // Llenar selector múltiple de buffers y hilos
+  const buffersSelect = document.getElementById('buffers-select');
+  const hilosSelect = document.getElementById('hilos-select');
+  coloresFibra.forEach(c => {
+    const opt1 = document.createElement('option');
+    opt1.value = c.color;
+    opt1.textContent = c.nombre;
+    opt1.style.background = c.color;
+    buffersSelect.appendChild(opt1);
+    const opt2 = document.createElement('option');
+    opt2.value = c.color;
+    opt2.textContent = c.nombre;
+    opt2.style.background = c.color;
+    hilosSelect.appendChild(opt2);
+  });
+
+  function updateTotalHilos() {
+    const nBuffers = buffersSelect.selectedOptions.length;
+    const nHilos = hilosSelect.selectedOptions.length;
+    form.hilos_total.value = nBuffers * nHilos;
+  }
+  buffersSelect.addEventListener('change', () => { updateTotalHilos(); renderChips(); });
+  hilosSelect.addEventListener('change', () => { updateTotalHilos(); renderChips(); });
+  setTimeout(() => { updateTotalHilos(); renderChips(); }, 10);
   // Si se pasa un objeto inicial en window.__trazoInitial (hack-light), rellenar campos
   const initial = window.__trazoInitial || null;
+  // Precargar valores básicos
   if (initial) {
     if (initial.nombre) form.nombre.value = initial.nombre;
     if (initial.descripcion) form.descripcion.value = initial.descripcion;
     if (initial.color) form.color.value = initial.color;
-    if (initial.hilos) form.hilos.value = initial.hilos;
-    if (initial.buffer) form.buffer.value = initial.buffer;
   }
+  // Precargar buffers y hilos seleccionados
+  setTimeout(() => {
+    if (initial && initial.buffers && Array.isArray(initial.buffers)) {
+      const buffersSelect = document.getElementById('buffers-select');
+      Array.from(buffersSelect.options).forEach(opt => {
+        opt.selected = initial.buffers.some(b => b.color === opt.value);
+      });
+    }
+    if (initial && initial.hilos && Array.isArray(initial.hilos)) {
+      const hilosSelect = document.getElementById('hilos-select');
+      Array.from(hilosSelect.options).forEach(opt => {
+        opt.selected = initial.hilos.some(h => h.color === opt.value);
+      });
+    }
+    if (typeof updateTotalHilos === 'function') updateTotalHilos();
+    if (typeof renderChips === 'function') renderChips();
+  }, 30);
   form.onsubmit = function(e) {
     e.preventDefault();
+    // Buffers seleccionados
+    const selectedBuffers = Array.from(buffersSelect.selectedOptions).map(o => ({nombre: o.textContent, color: o.value}));
+    // Hilos seleccionados
+    const selectedHilos = Array.from(hilosSelect.selectedOptions).map(o => ({nombre: o.textContent, color: o.value}));
+    const totalHilos = selectedBuffers.length * selectedHilos.length;
     const nuevo = {
       nombre: form.nombre.value,
       descripcion: form.descripcion.value,
       color: form.color.value,
       distancia: parseFloat(form.distancia.value) || 0,
-      hilos: parseInt(form.hilos.value) || 1,
-      buffer: parseInt(form.buffer.value) || 0,
+      buffers: selectedBuffers,
+      hilos: selectedHilos,
+      totalHilos,
       puntos: Array.isArray(puntos) ? puntos.slice() : []
     };
     if (typeof onSave === 'function') {
@@ -132,6 +257,7 @@ export function abrirModalTrazo(puntos, onSave) {
       trazos.push(nuevo);
       logStep('Guardar trazo', nuevo.nombre);
       alert('Tramo guardado correctamente');
+      guardarTrazosLS();
     }
     cerrarModalTramo();
   };
@@ -588,6 +714,124 @@ export class TramosMap {
       };
       container.appendChild(editMarkersBtn);
 
+      // --- Buscador de lugares (Nominatim) en la esquina superior izquierda ---
+      if (!self._searchControlAdded) {
+        const searchControl = L.control({ position: 'topleft' });
+        searchControl.onAdd = function(map) {
+          const searchDiv = L.DomUtil.create('div', 'leaflet-bar leaflet-control custom-search-control');
+          searchDiv.style.display = 'flex';
+          searchDiv.style.flexDirection = 'column';
+          searchDiv.style.gap = '4px';
+          searchDiv.style.padding = '6px';
+          searchDiv.style.background = '#fff';
+          searchDiv.style.borderRadius = '6px';
+          searchDiv.style.boxShadow = '0 2px 8px #0002';
+          searchDiv.style.minWidth = '220px';
+
+          const row = document.createElement('div');
+          row.style.display = 'flex';
+          row.style.gap = '4px';
+          row.style.alignItems = 'center';
+          const searchInput = document.createElement('input');
+          searchInput.type = 'text';
+          searchInput.placeholder = 'Buscar lugar...';
+          searchInput.style.padding = '5px 8px';
+          searchInput.style.borderRadius = '4px';
+          searchInput.style.border = '1px solid #ccc';
+          searchInput.style.flex = '1';
+          const searchBtn = document.createElement('button');
+          searchBtn.type = 'button';
+          searchBtn.innerText = 'Buscar';
+          searchBtn.style.padding = '5px 10px';
+          searchBtn.style.background = '#2563eb';
+          searchBtn.style.color = '#fff';
+          searchBtn.style.border = 'none';
+          searchBtn.style.borderRadius = '4px';
+          searchBtn.style.cursor = 'pointer';
+          row.appendChild(searchInput);
+          row.appendChild(searchBtn);
+          searchDiv.appendChild(row);
+
+          // Resultados de búsqueda
+          const resultsDiv = document.createElement('div');
+          resultsDiv.style.maxHeight = '120px';
+          resultsDiv.style.overflowY = 'auto';
+          resultsDiv.style.background = '#fff';
+          resultsDiv.style.position = 'absolute';
+          resultsDiv.style.zIndex = '9999';
+          resultsDiv.style.left = '0';
+          resultsDiv.style.right = '0';
+          resultsDiv.style.top = '100%';
+          resultsDiv.style.boxShadow = '0 2px 8px #0002';
+          resultsDiv.style.display = 'none';
+          searchDiv.appendChild(resultsDiv);
+
+          let searchMarkers = [];
+          function clearSearchMarkers() {
+            searchMarkers.forEach(m => m.remove());
+            searchMarkers = [];
+          }
+
+          function showResults(results) {
+            resultsDiv.innerHTML = '';
+            if (!results.length) {
+              resultsDiv.innerHTML = '<div style="padding:8px;color:#888">No se encontraron lugares</div>';
+            } else {
+              results.forEach(place => {
+                const item = document.createElement('div');
+                item.style.padding = '7px 10px';
+                item.style.cursor = 'pointer';
+                item.style.borderBottom = '1px solid #eee';
+                item.innerHTML = `<b>${place.display_name.split(',')[0]}</b><br><span style='font-size:12px;color:#666'>${place.display_name}</span>`;
+                item.onclick = () => {
+                  // Centrar mapa y poner marcador
+                  map.setView([parseFloat(place.lat), parseFloat(place.lon)], 17);
+                  clearSearchMarkers();
+                  const marker = L.marker([parseFloat(place.lat), parseFloat(place.lon)]).addTo(map)
+                    .bindPopup(`<b>${place.display_name.split(',')[0]}</b>`).openPopup();
+                  searchMarkers.push(marker);
+                  resultsDiv.style.display = 'none';
+                };
+                resultsDiv.appendChild(item);
+              });
+            }
+            resultsDiv.style.display = 'block';
+          }
+
+          searchBtn.onclick = function() {
+            const q = searchInput.value.trim();
+            if (!q) return;
+            resultsDiv.innerHTML = '<div style="padding:8px">Buscando...</div>';
+            resultsDiv.style.display = 'block';
+            fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(q)}`)
+              .then(r => r.json())
+              .then(data => showResults(data))
+              .catch(() => {
+                resultsDiv.innerHTML = '<div style="padding:8px;color:#e00">Error al buscar</div>';
+                resultsDiv.style.display = 'block';
+              });
+          };
+          searchInput.addEventListener('keydown', function(e) {
+            if (e.key === 'Enter') {
+              e.preventDefault();
+              searchBtn.click();
+            }
+          });
+          // Ocultar resultados al hacer click fuera
+          document.addEventListener('click', function hideResults(e) {
+            if (!searchDiv.contains(e.target)) {
+              resultsDiv.style.display = 'none';
+            }
+          });
+          // Limpiar marcadores de búsqueda al cambiar texto
+          searchInput.addEventListener('input', clearSearchMarkers);
+
+          return searchDiv;
+        };
+        searchControl.addTo(self.map);
+        self._searchControlAdded = true;
+      }
+
       // Guardamos referencias para actualizaciones desde la instancia
       self._toggleBtn = toggle;
       self._finishBtn = finish;
@@ -1010,6 +1254,7 @@ export class TramosMap {
     });
     this.lines.push(poly);
     this.tramos.push(safe);
+    guardarTrazosLS();
     this._renderInfo();
   }
 
@@ -1020,9 +1265,19 @@ export class TramosMap {
 
   _renderInfo() {
     if (!this.infoDiv) return;
-    const trazosHtml = this.tramos.length ? this.tramos.map((t, i) => `${i+1}. ${t.nombre} (${(t.distancia||0)} km)`).join('<br>') : 'Ninguno';
+    const trazosHtml = this.tramos.length ? this.tramos.map((t, i) => {
+      let buf = t.buffers && t.buffers.length ? t.buffers.map(b => `<span style="display:inline-block;width:14px;height:14px;background:${b.color};border-radius:3px;margin-right:2px;vertical-align:middle;" title="${b.nombre}"></span>`).join('') : '';
+      let hil = t.hilos && t.hilos.length ? t.hilos.map(h => `<span style="display:inline-block;width:14px;height:14px;background:${h.color};border-radius:50%;margin-right:2px;vertical-align:middle;" title="${h.nombre}"></span>`).join('') : '';
+      return `${i+1}. ${t.nombre} (${(t.distancia||0)} km) <br>Buffers: ${buf} <br>Hilos: ${hil}`;
+    }).join('<br><br>') : 'Ninguno';
     const marcadoresHtml = this.marcadores.length ? `<br/><b>Marcadores:</b> ${this.marcadores.length}` : '';
     this.infoDiv.innerHTML = '<b>Trazos guardados:</b><br>' + trazosHtml + marcadoresHtml;
+    // Emit event so other parts of the app (save flow, UI) can react to changes
+    try {
+      const safeTramos = this.tramos.map(t => Object.assign({}, t));
+      const safeMarcadores = this.marcadores.map(m => Object.assign({}, m));
+      document.dispatchEvent(new CustomEvent('tramos:changed', { detail: { tramos: safeTramos, marcadores: safeMarcadores } }));
+    } catch (e) { /* no-op */ }
   }
 }
 

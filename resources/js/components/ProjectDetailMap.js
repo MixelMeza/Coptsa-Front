@@ -1,7 +1,50 @@
+// Calcula el resumen de entidades (trazos, cajas, mufas, onts) a partir de los arrays
+// Calcula el resumen de entidades (trazos, cajas, mufas, mangas, nap1, reservas, postes) a partir de los arrays
+function calcularResumenProyecto(trazos, marcadores) {
+    let cajas = 0, mufas = 0, mangas = 0, nap1 = 0, reservas = 0, postes = 0;
+    if (Array.isArray(marcadores)) {
+        marcadores.forEach(m => {
+            const tipo = (m.type || m.tipo || '').toLowerCase();
+            // Mapear tipos de marcador a entidades de negocio
+            switch (tipo) {
+                case 'caja':
+                    cajas++;
+                    break;
+                case 'mufa':
+                    mufas++;
+                    break;
+                case 'pin':
+                    mangas++;
+                    break;
+                case 'flag':
+                    nap1++;
+                    reservas++;
+                    break;
+                case 'star':
+                    reservas++;
+                    break;
+                case 'poste':
+                    postes++;
+                    break;
+                default:
+                    break;
+            }
+        });
+    }
+    return {
+        cajas,
+        mufas,
+        mangas,
+        nap1,
+        reservas,
+        postes,
+        trazos: Array.isArray(trazos) ? trazos.length : 0
+    };
+}
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { TramosMap, calcularDistancia } from './TramosMap.js';
-import { createProyecto, updateTrazado, getProyecto } from '../api/proyectos.js';
+import { createProyecto, updateTrazado, updateProyecto, getProyecto } from '../api/proyectos.js';
 
 // Inicialización del mapa y UI para crear/editar proyectos
 document.addEventListener('DOMContentLoaded', async () => {
@@ -35,11 +78,11 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     root.innerHTML = `
         <div style="margin-bottom:1rem;">
-            <label>Nombre del proyecto: <input id="project-name" type="text" class="input" value="${nombre}" ${isCreate ? '' : 'disabled'} /></label>
+            <label>Nombre del proyecto: <input id="project-name" type="text" class="input" value="${nombre}" /></label>
         </div>
         <div id="map" style="height:520px; margin-bottom:1rem;"></div>
+        <div id="project-summary" style="margin-bottom:12px;color:#333;font-size:14px;"></div>
         <div style="display:flex;gap:12px;align-items:center;margin-bottom:8px;">
-            <!-- Save button moved to map controls. Use the map 'Guardar todo' button to trigger save. -->
             <span style="color:#666;font-size:14px;">Usa el botón "Guardar todo" en el mapa para persistir trazos y marcadores.</span>
         </div>
         <div id="tramos-info"></div>
@@ -122,9 +165,9 @@ document.addEventListener('DOMContentLoaded', async () => {
         });
 
         const summary = computeProjectSummary(enhancedTramos);
-    const marcadores = tramosMap.getMarkers ? tramosMap.getMarkers() : [];
-    // DEBUG: log what we are sending so we can verify markers exist
-    try { console.debug('Saving payload: tramos=', nuevosTramos, 'marcadores=', marcadores); } catch(e) {}
+        const marcadores = tramosMap.getMarkers ? tramosMap.getMarkers() : [];
+        // DEBUG: log what we are sending so we can verify markers exist
+        try { console.debug('Saving payload: tramos=', nuevosTramos, 'marcadores=', marcadores); } catch(e) {}
         // Normalize marker objects to expected shape
         const normalizedMarkers = (Array.isArray(marcadores) ? marcadores : []).map(m => ({
             type: m.tipo || m.type || 'pin',
@@ -135,73 +178,140 @@ document.addEventListener('DOMContentLoaded', async () => {
             createdAt: m.createdAt || new Date().toISOString()
         }));
         const marcadoresCount = normalizedMarkers.length;
+        // Calcular y guardar resumen de entidades
+        const resumenEntidades = calcularResumenProyecto(enhancedTramos, normalizedMarkers);
+        // Asignar resumen a variables principales para la BD
+        const resumenVars = {
+            marcadores: marcadoresCount || 0,
+            rutas: summary.total_tramos || 0,
+            distancia: summary.total_distancia_km || 0,
+            cajas: resumenEntidades.cajas || 0,
+            mufas: resumenEntidades.mufas || 0,
+            mangas: resumenEntidades.mangas || 0,
+            nap1: resumenEntidades.nap1 || 0,
+            reservas: resumenEntidades.reservas || 0,
+            postes: resumenEntidades.postes || 0,
+            trazos: resumenEntidades.trazos || 0
+        };
     if (isCreate) {
-            const nombreVal = document.getElementById('project-name').value.trim();
-            if (!nombreVal) {
-                btn.disabled = false;
-                btn.innerText = originalText;
-                return alert('Ingrese el nombre del proyecto');
-            }
-            try {
-                // Crear proyecto en backend (tu endpoint POST /api/proyectos)
-                const payload = {
-                    nombre: nombreVal,
-                    json: { trazos: enhancedTramos, marcadores: normalizedMarkers },
-                    summary,
-                    distancia: summary.total_distancia_km || 0,
-                    rutas: summary.total_tramos || 0,
-                    marcadores: marcadoresCount || 0
-                };
-                const data = await createProyecto(payload);
-                if (data) {
-                    alert('Proyecto creado correctamente');
-                    // notify UI that save finished successfully
-                    document.dispatchEvent(new CustomEvent('tramos:saved', { detail: { success: true } }));
-                    // buscar id en varias propiedades posibles que el backend pueda devolver
-                    const newId = data.proyectosID || data.proyectosId || data.id || data.proyectoID || data.idProyecto || (data.proyecto && data.proyecto.proyectosID);
-                    if (newId) {
-                        window.location.href = `/projects/${newId}`;
-                        return; // redirige
-                    } else {
-                        // si no viene id, navegar a listado
-                        window.location.href = '/projects';
-                        return;
-                    }
-                }
-            } catch (e) {
-                console.error('Create project failed', e);
-                alert('Error al crear el proyecto: ' + (e.message || e));
-            } finally {
-                // dispatch saved/failed event to notify UI
-                document.dispatchEvent(new CustomEvent('tramos:saved', { detail: { success: false } }));
-            }
-        } else {
-            try {
-                // Llamar al endpoint PUT /api/proyectos/{id}/trazado que definiste
-                // enviar trazos en top-level para que el servicio los encuentre como "trazos"
-                const payload = {
+        const nombreVal = document.getElementById('project-name').value.trim();
+        if (!nombreVal) {
+            btn.disabled = false;
+            btn.innerText = originalText;
+            return alert('Ingrese el nombre del proyecto');
+        }
+        try {
+            // Crear proyecto en backend (tu endpoint POST /api/proyectos)
+            const payload = {
+                nombre: nombreVal,
+                json: {
                     trazos: enhancedTramos,
                     marcadores: normalizedMarkers,
-                    summary,
-                    distancia: summary.total_distancia_km || 0,
-                    rutas: summary.total_tramos || 0,
-                    marcadoresCount: marcadoresCount || 0
-                };
-                const data = await updateTrazado(root.dataset.id, payload);
-                if (data) {
-                    alert('Trazos guardados correctamente');
-                    // inform UI and then reload
-                    document.dispatchEvent(new CustomEvent('tramos:saved', { detail: { success: true } }));
-                    window.location.reload();
+                    resumen: resumenEntidades
+                },
+                summary,
+                ...resumenVars
+            };
+            const data = await createProyecto(payload);
+            if (data) {
+                alert('Proyecto creado correctamente');
+                // notify UI that save finished successfully
+                document.dispatchEvent(new CustomEvent('tramos:saved', { detail: { success: true } }));
+                // buscar id en varias propiedades posibles que el backend pueda devolver
+                const newId = data.proyectosID || data.proyectosId || data.id || data.proyectoID || data.idProyecto || (data.proyecto && data.proyecto.proyectosID);
+                if (newId) {
+                    window.location.href = `/projects/${newId}`;
+                    return; // redirige
+                } else {
+                    // si no viene id, navegar a listado
+                    window.location.href = '/projects';
                     return;
                 }
-            } catch (e) {
-                console.error('Save trazado failed', e);
-                alert('Error al guardar los trazos: ' + (e.message || e));
-            } finally {
-                document.dispatchEvent(new CustomEvent('tramos:saved', { detail: { success: false } }));
             }
+        } catch (e) {
+            console.error('Create project failed', e);
+            alert('Error al crear el proyecto: ' + (e.message || e));
+        } finally {
+            // dispatch saved/failed event to notify UI
+            document.dispatchEvent(new CustomEvent('tramos:saved', { detail: { success: false } }));
         }
+    } else {
+        try {
+            // Llamar al endpoint PUT /api/proyectos/{id}/trazado que definiste
+            // enviar trazos en top-level para que el servicio los encuentre como "trazos"
+            const payload = {
+                trazos: enhancedTramos,
+                marcadores: normalizedMarkers,
+                resumen: resumenEntidades,
+                summary,
+                ...resumenVars
+            };
+            // Use updateProyecto to persist both top-level fields and the JSON payload
+            // so the backend saves the `json` column and summary fields in the DB.
+            // Tomar el nombre actualizado del input
+            const nombreVal = document.getElementById('project-name').value.trim();
+            const updatePayload = {
+                nombre: nombreVal,
+                json: {
+                    trazos: enhancedTramos,
+                    marcadores: normalizedMarkers,
+                    resumen: resumenEntidades
+                },
+                ...resumenVars
+            };
+            const data = await updateProyecto(root.dataset.id, updatePayload);
+            if (data) {
+                // Also call trazado endpoint if your backend uses a separate route to persist geometry
+                try {
+                    const trazadoPayload = {
+                        trazos: enhancedTramos,
+                        marcadores: normalizedMarkers,
+                        resumen: resumenEntidades
+                    };
+                    await updateTrazado(root.dataset.id, trazadoPayload);
+                } catch (errT) {
+                    console.warn('updateTrazado failed (non-fatal):', errT);
+                }
+                alert('Trazos guardados correctamente');
+                // inform UI and then reload
+                document.dispatchEvent(new CustomEvent('tramos:saved', { detail: { success: true } }));
+                window.location.reload();
+                return;
+            }
+        } catch (e) {
+            console.error('Save trazado failed', e);
+            alert('Error al guardar los trazos: ' + (e.message || e));
+        } finally {
+            document.dispatchEvent(new CustomEvent('tramos:saved', { detail: { success: false } }));
+        }
+    }
+
+    // Live update handler: update summary UI and keep latest resumen available
+    let latestResumen = null;
+    function updateLiveSummary(tramosArr, marcadoresArr) {
+        try {
+            const computed = computeProjectSummary(tramosArr || []);
+            const resumenEnt = calcularResumenProyecto(tramosArr || [], marcadoresArr || []);
+            latestResumen = Object.assign({}, resumenEnt, {
+                distancia: computed.total_distancia_km || 0,
+                rutas: computed.total_tramos || 0,
+                marcadores: Array.isArray(marcadoresArr) ? marcadoresArr.length : 0
+            });
+            const el = document.getElementById('project-summary');
+            if (el) {
+                el.innerHTML = `<b>Resumen:</b> Tramos: ${latestResumen.trazos || 0} | Rutas: ${latestResumen.rutas || 0} | Distancia: ${latestResumen.distancia || 0} km | Marcadores: ${latestResumen.marcadores || 0} | Cajas: ${latestResumen.cajas || 0} | Mufas: ${latestResumen.mufas || 0} | Mangas: ${latestResumen.mangas || 0} | NAP1: ${latestResumen.nap1 || 0} | Reservas: ${latestResumen.reservas || 0} | Postes: ${latestResumen.postes || 0}`;
+            }
+        } catch (e) { console.warn('updateLiveSummary error', e); }
+    }
+
+    // Listen for changes emitted by TramosMap
+    document.addEventListener('tramos:changed', (ev) => {
+        const detail = ev && ev.detail ? ev.detail : {};
+        updateLiveSummary(detail.tramos || [], detail.marcadores || []);
+    });
+
+    // Initialize live summary with any data we already loaded
+    try { updateLiveSummary(tramos, marcadores); } catch(e) {}
     }
 
     // Listen for external save triggers from the map (button dispatches 'tramos:save')

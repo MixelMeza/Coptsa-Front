@@ -33,7 +33,7 @@ function makeTable(items) {
   const headRow = document.createElement('tr');
   [
     'ID', 'Nombre', 'Distancia', 'Estado', 'Fecha creación',
-    'Marcadores', 'Rutas', 'Mangas', 'Reservas', 'NAP1', 'NAP2', 'ONT', 'Postes', 'Acciones'
+    'Cajas NAT', 'mangas', 'Reservas', 'Trazos', 'Acciones'
   ].forEach(h => {
     const th = document.createElement('th');
     th.textContent = h;
@@ -44,33 +44,35 @@ function makeTable(items) {
 
   const tbody = document.createElement('tbody');
   (items || []).forEach(p => {
+    // Analizar el JSON del proyecto para contar entidades
+  // Mostrar primero los valores principales si existen (varias formas / nombres de campo)
+  let nap1 = (p.nap1 !== undefined && p.nap1 !== null) ? Number(p.nap1) : 0;
+  let mangas = (p.mangas !== undefined && p.mangas !== null) ? Number(p.mangas) : 0;
+  let reservas = (p.reservas !== undefined && p.reservas !== null) ? Number(p.reservas) : 0;
+  let trazos = (p.trazos !== undefined && p.trazos !== null) ? Number(p.trazos) : (p.rutas !== undefined && p.rutas !== null) ? Number(p.rutas) : (p.total_tramos !== undefined && p.total_tramos !== null) ? Number(p.total_tramos) : 0;
     const tr = document.createElement('tr');
-  tr.appendChild(createCell(p.proyectosID ?? p.id ?? ''));
-  tr.appendChild(createCell(p.nombre || ''));
-      tr.appendChild(createCell(p.distancia != null ? p.distancia + ' km' : ''));
-  // Estado: 1=Activo, 0=Inactivo, otro=texto
-      let estadoTxt = '';
-      if (p.estado === 1) estadoTxt = 'Activo';
-      else if (p.estado === 0) estadoTxt = 'Inactivo';
-      else if (typeof p.estado === 'string') estadoTxt = p.estado;
-      else estadoTxt = String(p.estado ?? '');
-      tr.appendChild(createCell(estadoTxt));
-  // Fecha creación: mostrar solo fecha y hora legible
-      let fechaTxt = '';
-      if (p.fechaCreacion) {
-        fechaTxt = String(p.fechaCreacion).replace('T', ' ').substring(0, 16);
-      } else if (p.fecha) {
-        fechaTxt = String(p.fecha).replace('T', ' ').substring(0, 16);
-      }
-      tr.appendChild(createCell(fechaTxt));
-  tr.appendChild(createCell(p.marcadores != null ? p.marcadores : ''));
-  tr.appendChild(createCell(p.rutas != null ? p.rutas : ''));
-  tr.appendChild(createCell(p.mangas != null ? p.mangas : ''));
-  tr.appendChild(createCell(p.reservas != null ? p.reservas : ''));
-  tr.appendChild(createCell(p.nap1 != null ? p.nap1 : ''));
-  tr.appendChild(createCell(p.nap2 != null ? p.nap2 : ''));
-  tr.appendChild(createCell(p.ont != null ? p.ont : ''));
-  tr.appendChild(createCell(p.postes != null ? p.postes : ''));
+    tr.appendChild(createCell(p.proyectosID ?? p.id ?? ''));
+    tr.appendChild(createCell(p.nombre || ''));
+    tr.appendChild(createCell(p.distancia != null ? p.distancia + ' km' : ''));
+    // Estado: 1=Activo, 0=Inactivo, otro=texto
+    let estadoTxt = '';
+    if (p.estado === 1) estadoTxt = 'Activo';
+    else if (p.estado === 0) estadoTxt = 'Inactivo';
+    else if (typeof p.estado === 'string') estadoTxt = p.estado;
+    else estadoTxt = String(p.estado ?? '');
+    tr.appendChild(createCell(estadoTxt));
+    // Fecha creación: mostrar solo fecha y hora legible
+    let fechaTxt = '';
+    if (p.fechaCreacion) {
+      fechaTxt = String(p.fechaCreacion).replace('T', ' ').substring(0, 16);
+    } else if (p.fecha) {
+      fechaTxt = String(p.fecha).replace('T', ' ').substring(0, 16);
+    }
+    tr.appendChild(createCell(fechaTxt));
+  tr.appendChild(createCell(nap1));
+  tr.appendChild(createCell(mangas));
+  tr.appendChild(createCell(reservas));
+  tr.appendChild(createCell(trazos));
 
     const actions = document.createElement('td');
     const viewBtn = document.createElement('button');
