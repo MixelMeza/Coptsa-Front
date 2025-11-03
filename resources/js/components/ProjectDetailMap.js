@@ -80,7 +80,9 @@ document.addEventListener('DOMContentLoaded', async () => {
         <div style="margin-bottom:1rem;">
             <label>Nombre del proyecto: <input id="project-name" type="text" class="input" value="${nombre}" /></label>
         </div>
-        <div id="map" style="height:520px; margin-bottom:1rem;"></div>
+        <div id="map-wrapper" style="position:relative;height:520px;margin-bottom:1rem;">
+            <div id="map" style="height:100%;"></div>
+        </div>
         <div id="project-summary" style="margin-bottom:12px;color:#333;font-size:14px;"></div>
         <div style="display:flex;gap:12px;align-items:center;margin-bottom:8px;">
             <span style="color:#666;font-size:14px;">Usa el botón "Guardar todo" en el mapa para persistir trazos y marcadores.</span>
@@ -365,6 +367,27 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Listen for external save triggers from the map (button dispatches 'tramos:save')
     document.addEventListener('tramos:save', (e) => {
         performSave();
+    });
+
+    // Patch any checkboxes that may live inside TramosMap controls (added by TramosMap._addControls)
+    document.addEventListener('DOMContentLoaded', () => {
+        try {
+            const controlInputs = document.querySelectorAll('.leaflet-control input[type=checkbox][data-layer]');
+            if (controlInputs && controlInputs.length) {
+                controlInputs.forEach(cb => {
+                    // remove existing handler and reattach to call the instance method
+                    cb.onchange = null;
+                    cb.addEventListener('change', (ev) => {
+                        const layer = ev.target.dataset.layer;
+                        try {
+                            if (window.__tramosMapInstance && typeof window.__tramosMapInstance.setLayerVisibility === 'function') {
+                                window.__tramosMapInstance.setLayerVisibility(layer, !!ev.target.checked);
+                            }
+                        } catch (e) { console.warn('Error toggling control layer', e); }
+                    });
+                });
+            }
+        } catch (e) { console.warn('Error initializing map filters UI', e); }
     });
 });
 

@@ -411,6 +411,11 @@ export class TramosMap {
     this.tramos = [];
     this.marcadores = [];
     this._markerLayers = [];
+    // Layer groups for filtering by type
+    this._trazosLayer = L.layerGroup();
+    this._markerGroups = Object.create(null);
+    // visible state map
+    this._visibleGroups = Object.create(null);
     this._placingMarker = false;
     this._markerType = 'pin';
     this._interactionLock = false;
@@ -428,6 +433,14 @@ export class TramosMap {
     this._addControls();
     this._setupGuardarListeners();
     this._renderInfo();
+    // Initialize default marker groups and add to map
+    ['pin','flag','star','caja','mufa','poste','manga','nap1','reserva'].forEach(k => {
+      this._markerGroups[k] = L.layerGroup().addTo(this.map);
+      this._visibleGroups[k] = true;
+    });
+    // add trazos layer by default
+    this._trazosLayer.addTo(this.map);
+    this._visibleGroups['trazos'] = true;
   }
 
   // Agrega el selector de tipo de mapa (callejero/satélite) solo una vez
@@ -714,6 +727,45 @@ export class TramosMap {
       };
       container.appendChild(editMarkersBtn);
 
+      // --- Filtros por tipo (Tramos / Mangas / NAP1 / Reservas / Cajas / Mufas / Postes) ---
+      const filtrosDiv = document.createElement('div');
+      filtrosDiv.style.display = 'flex';
+      filtrosDiv.style.flexDirection = 'column';
+      filtrosDiv.style.gap = '6px';
+      filtrosDiv.style.marginTop = '8px';
+      filtrosDiv.style.paddingTop = '6px';
+      filtrosDiv.style.borderTop = '1px solid #eee';
+
+      const filters = [
+        { key: 'trazos', label: 'Tramos' },
+        { key: 'pin', label: 'Mangas' },
+        { key: 'flag', label: 'Cajas NAT' },
+        { key: 'star', label: 'Reservas' },
+      ];
+      filters.forEach(f => {
+        const row = document.createElement('label');
+        row.style.display = 'flex';
+        row.style.alignItems = 'center';
+        row.style.gap = '6px';
+        const cb = document.createElement('input');
+        cb.type = 'checkbox';
+        cb.checked = true;
+        cb.dataset.layer = f.key;
+        cb.onchange = (e) => {
+          const layer = e.target.dataset.layer;
+          // use self (closure) to reference instance
+          self.setLayerVisibility(layer, !!e.target.checked);
+        };
+        const span = document.createElement('span');
+        span.style.fontSize = '13px';
+        span.style.color = '#333';
+        span.textContent = f.label;
+        row.appendChild(cb);
+        row.appendChild(span);
+        filtrosDiv.appendChild(row);
+      });
+      container.appendChild(filtrosDiv);
+
       // --- Buscador de lugares (Nominatim) en la esquina superior izquierda ---
       if (!self._searchControlAdded) {
         const searchControl = L.control({ position: 'topleft' });
@@ -882,6 +934,81 @@ export class TramosMap {
     control.addTo(this.map);
   }
 
+  // Map various incoming type strings to canonical internal keys
+  _canonicalMarkerType(type) {
+    if (!type) return 'pin';
+    const t = String(type).toLowerCase();
+    if (t === 'pin' || t === 'manga' || t === 'mangas' || t.indexOf('mang') !== -1) return 'pin';
+    if (t === 'flag' || t === 'nap1' || t.indexOf('nap') !== -1) return 'flag';
+    if (t === 'star' || t === 'reserva' || t === 'reservas') return 'star';
+    if (t === 'caja' || t === 'boxes') return 'caja';
+    if (t === 'mufa' || t === 'mufas') return 'mufa';
+    if (t === 'poste' || t === 'postes') return 'poste';
+    // fallback
+    return t;
+  }
+
+  // Control visibility of a named layer/group
+  setLayerVisibility(name, visible) {
+    if (!name) return;
+    if (name === 'trazos') {
+      if (visible && !this._visibleGroups['trazos']) {
+        this._trazosLayer.addTo(this.map);
+      } else if (!visible && this._visibleGroups['trazos']) {
+        try { this.map.removeLayer(this._trazosLayer); } catch(e) {}
+      }
+      this._visibleGroups['trazos'] = !!visible;
+      // mark tramos included/excluded according to visibility
+      this.tramos.forEach((t, idx) => {
+        t.included = !!visible;
+        // also add/remove corresponding polyline from trazos layer
+        try {
+          const poly = this.lines[idx];
+          if (poly) {
+            if (visible) this._trazosLayer.addLayer(poly);
+            else this._trazosLayer.removeLayer(poly);
+          }
+        } catch(e) {}
+      });
+      // Emit change so UI and save flows update
+      try { this._renderInfo(); } catch (e) {}
+      return;
+    }
+    const group = this._markerGroups[name];
+    if (!group) return;
+    if (visible && !this._visibleGroups[name]) {
+      group.addTo(this.map);
+    } else if (!visible && this._visibleGroups[name]) {
+      try { this.map.removeLayer(group); } catch(e) {}
+    }
+    this._visibleGroups[name] = !!visible;
+    // mark markers of that canonical type as included/excluded and add/remove from group
+    this.marcadores.forEach((m, idx) => {
+      try {
+        const canonical = this._canonicalMarkerType(m.tipo || m.type || m);
+        if (canonical === name) {
+          m.included = !!visible;
+          const layer = this._markerLayers[idx];
+          if (layer) {
+            if (visible) {
+              const g = this._markerGroups[canonical] || this._markerGroups['pin'];
+              g.addLayer(layer);
+            } else {
+              try { (this._markerGroups[canonical] || this._markerGroups['pin']).removeLayer(layer); } catch(e) { try { this.map.removeLayer(layer); } catch(e){} }
+            }
+          }
+        }
+      } catch (e) {}
+    });
+    // Emit change so UI and save flows update
+    try { this._renderInfo(); } catch (e) {}
+  }
+
+  toggleLayer(name) {
+    const cur = !!this._visibleGroups[name];
+    this.setLayerVisibility(name, !cur);
+  }
+
   // Expose a method to update UI state for the guardar button
   _updateGuardarButton() {
     if (!this._guardarBtn) return;
@@ -920,14 +1047,14 @@ export class TramosMap {
     try {
       const url = iconByType[safe.tipo];
       if (url) {
-        const icon = L.icon({ iconUrl: url, iconSize: [28, 36], iconAnchor: [14, 36], popupAnchor: [0, -36] });
-        markerObj = L.marker([safe.lat, safe.lng], { icon }).addTo(this.map);
+      const icon = L.icon({ iconUrl: url, iconSize: [28, 36], iconAnchor: [14, 36], popupAnchor: [0, -36] });
+      markerObj = L.marker([safe.lat, safe.lng], { icon });
       }
     } catch (err) {
       // ignore and fallback
       markerObj = null;
     }
-    // Fallback to SVG divIcon if PNG icon creation failed or not found
+  // Fallback to SVG divIcon if PNG icon creation failed or not found
     if (!markerObj) {
       const svgByType = {
         pin: `<svg width="34" height="44" viewBox="0 0 24 32" xmlns="http://www.w3.org/2000/svg"><path d="M12 0C7.03 0 3 4.03 3 9c0 7.5 9 19 9 19s9-11.5 9-19c0-4.97-4.03-9-9-9z" fill="#ef4444"/><circle cx="12" cy="9" r="3" fill="#fff"/></svg>`,
@@ -936,13 +1063,64 @@ export class TramosMap {
       };
       const iconHtml = svgByType[safe.tipo] ? `<div style="display:flex;align-items:center;justify-content:center">${svgByType[safe.tipo]}</div>` : `<div style="background:#fff;padding:4px;border-radius:6px;border:1px solid #ddd">${safe.nombre}</div>`;
       const icon = L.divIcon({ className: 'custom-marker ' + safe.tipo, html: iconHtml, iconAnchor: [12, 34] });
-      markerObj = L.marker([safe.lat, safe.lng], { icon }).addTo(this.map);
+      markerObj = L.marker([safe.lat, safe.lng], { icon });
     }
-    markerObj.bindPopup(`<b>${safe.nombre}</b><br/>${safe.descripcion || ''}`);
     // Persist a plain object (no Leaflet instance) in marcadores
-    const plain = { nombre: safe.nombre, descripcion: safe.descripcion, lat: safe.lat, lng: safe.lng, tipo: safe.tipo, createdAt: safe.createdAt };
-    this.marcadores.push(plain);
-    this._markerLayers.push(markerObj);
+    const plain = { nombre: safe.nombre, descripcion: safe.descripcion, lat: safe.lat, lng: safe.lng, tipo: safe.tipo, createdAt: safe.createdAt, included: true };
+    const self = this;
+    function _buildMarkerPopup(p) {
+      const rawType = (p.tipo || p.type || '').toString().toLowerCase();
+      const canonical = (typeof self._canonicalMarkerType === 'function') ? self._canonicalMarkerType(rawType) : rawType;
+      let tipoHumano = '';
+      if (canonical === 'pin') {
+        if (rawType.indexOf('mufa') !== -1) tipoHumano = 'Mufa';
+        else tipoHumano = 'Manga';
+      } else if (canonical === 'star') {
+        tipoHumano = 'Reserva';
+      } else if (canonical === 'flag') {
+        tipoHumano = 'Caja NAT';
+      } else if (rawType && rawType.length) {
+        tipoHumano = rawType.charAt(0).toUpperCase() + rawType.slice(1);
+      }
+      const nombre = p.nombre || p.name || 'Sin nombre';
+      const desc = p.descripcion || p.description || '';
+      const lat = typeof p.lat === 'number' ? p.lat.toFixed(6) : (p.lat || '');
+      const lng = typeof p.lng === 'number' ? p.lng.toFixed(6) : (p.lng || '');
+      const created = p.createdAt ? new Date(p.createdAt).toLocaleString() : '';
+      return `<div style="min-width:180px;max-width:320px;font-size:13px;color:#111">
+        <div style="font-weight:700;margin-bottom:6px">${nombre}</div>
+        <div style="margin-bottom:6px;color:#444">${desc}</div>
+        ${tipoHumano ? `<div style="font-size:12px;color:#666">Tipo: <b>${tipoHumano}</b></div>` : ''}
+        <div style="font-size:12px;color:#666">Coordenadas: <span>${lat}, ${lng}</span></div>
+        ${created ? `<div style="font-size:12px;color:#666">Creado: <span>${created}</span></div>` : ''}
+      </div>`;
+    }
+    markerObj.bindPopup(_buildMarkerPopup(plain));
+  // Add to internal arrays
+  this.marcadores.push(plain);
+  this._markerLayers.push(markerObj);
+    // Place marker inside the appropriate layer group so it can be toggled
+    try {
+      const canonical = this._canonicalMarkerType(safe.tipo);
+      // Ensure group exists
+      if (!this._markerGroups[canonical]) {
+        this._markerGroups[canonical] = L.layerGroup().addTo(this.map);
+        this._visibleGroups[canonical] = true;
+      }
+      const group = this._markerGroups[canonical] || this._markerGroups['pin'];
+      try {
+        group.addLayer(markerObj);
+        // ensure group is added to map if visible
+        if (this._visibleGroups[canonical] && (!this.map.hasLayer || !this.map.hasLayer(group))) {
+          try { group.addTo(this.map); } catch(e) {}
+        }
+      } catch (e) {
+        // fallback: add marker directly to map
+        try { markerObj.addTo(this.map); } catch(e){}
+      }
+    } catch (e) {
+      try { markerObj.addTo(this.map); } catch(e){}
+    }
 
   // show immediate feedback
   try { _showToast('Marcador agregado'); } catch(e) {}
@@ -987,7 +1165,8 @@ export class TramosMap {
         plain.lat = nuevo.lat;
         plain.lng = nuevo.lng;
         markerObj.setLatLng([nuevo.lat, nuevo.lng]);
-        markerObj.setPopupContent(`<b>${nuevo.nombre}</b><br/>${nuevo.descripcion || ''}`);
+        // update popup with rich content
+        try { markerObj.setPopupContent(_buildMarkerPopup(plain)); } catch(e) { markerObj.setPopupContent(`<b>${nuevo.nombre}</b><br/>${nuevo.descripcion || ''}`); }
         this._renderInfo();
         logStep('Editar marcador', nuevo.nombre);
         try { _showToast('Marcador actualizado'); } catch(e) {}
@@ -1096,6 +1275,11 @@ export class TramosMap {
   }
 
   getMarkers() {
+    // return only markers currently included (not filtered-out)
+    return this.marcadores.filter(m => m.included !== false).map(m => Object.assign({}, m));
+  }
+
+  getAllMarkers() {
     return this.marcadores.map(m => Object.assign({}, m));
   }
 
@@ -1131,7 +1315,7 @@ export class TramosMap {
 
   finishTramo() {
     if (this.currentPoints.length <= 1) return alert('Agrega al menos dos puntos para crear un trazo');
-    // Finalizar trazo y limpiar overlays
+    // Finalizar trazo y limpiar overlaysF
     const nuevo = {
       nombre: 'Sin nombre',
       descripcion: '',
@@ -1214,7 +1398,7 @@ export class TramosMap {
   addTramo(tramo) {
     // normalize tramo object to ensure no nulls
     const safe = Object.assign({
-      nombre: 'Sin nombre', descripcion: '', color: '#2563eb', distancia: 0, hilos: 1, buffer: 0, puntos: []
+      nombre: 'Sin nombre', descripcion: '', color: '#2563eb', distancia: 0, hilos: 1, buffer: 0, puntos: [], included: true
     }, tramo || {});
     if (!Array.isArray(safe.puntos)) safe.puntos = [];
     const poly = L.polyline(safe.puntos, { color: safe.color || '#2563eb', weight: 4 }).addTo(this.map);
@@ -1230,9 +1414,12 @@ export class TramosMap {
       window.__interactionLock = true;
       window.__trazoInitial = { ...safe };
       window.__trazoOnDelete = () => {
-        this.map.removeLayer(poly);
+        try { this._trazosLayer.removeLayer(poly); } catch(e) { try { this.map.removeLayer(poly); } catch(e){} }
         const idx = this.tramos.indexOf(safe);
         if (idx !== -1) this.tramos.splice(idx, 1);
+        // also remove from lines array
+        const lineIdx = this.lines.indexOf(poly);
+        if (lineIdx !== -1) this.lines.splice(lineIdx, 1);
         this._renderInfo();
         logStep('Eliminar trazo', safe.nombre);
         window.__trazoInitial = null;
@@ -1254,13 +1441,15 @@ export class TramosMap {
     });
     this.lines.push(poly);
     this.tramos.push(safe);
+    // add poly to trazos layer so it can be toggled
+    try { this._trazosLayer.addLayer(poly); } catch(e) { poly.addTo(this.map); }
     guardarTrazosLS();
     this._renderInfo();
   }
 
   getTramos() {
-    // devolver copia segura (no referencias directas)
-    return this.tramos.map(t => Object.assign({}, t));
+    // devolver solo trazos incluidos (filtrados) como copia segura
+    return this.tramos.filter(t => t.included !== false).map(t => Object.assign({}, t));
   }
 
   _renderInfo() {
