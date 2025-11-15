@@ -209,7 +209,12 @@ export function abrirModalTrazo(puntos, onSave) {
   hilosSelect.addEventListener('change', () => { updateTotalHilos(); renderChips(); });
   setTimeout(() => { updateTotalHilos(); renderChips(); }, 10);
   // Si se pasa un objeto inicial en window.__trazoInitial (hack-light), rellenar campos
-  const initial = window.__trazoInitial || null;
+    const initial = window.__marcadorInitial || null;
+    if (initial) {
+      try { if (initial.nombre) form.nombre.value = initial.nombre; } catch(e) {}
+      try { if (initial.descripcion) form.descripcion.value = initial.descripcion; } catch(e) {}
+      try { if (initial.color) form.color.value = initial.color; } catch(e) {}
+    }
   // Precargar valores básicos
   if (initial) {
     if (initial.nombre) form.nombre.value = initial.nombre;
@@ -329,6 +334,31 @@ const modalMarcadorHtml = `
     <textarea name="descripcion" rows="3"></textarea>
     <label>Ubicación (lat,lng)</label>
     <input name="latlng" type="text" readonly />
+    <label>Estado</label>
+    <select name="estado" id="form-marcador-estado">
+      <option value="ok">OK</option>
+      <option value="warn">Warn</option>
+      <option value="alarm">Alarm</option>
+      <option value="offline">Offline</option>
+    </select>
+    <label style="margin-top:8px"><input id="form-marcador-es-mufa" type="checkbox" style="margin-right:8px"/> Es una MUFA (anidar cajas)</label>
+    <label>Imagen (opcional)</label>
+    <input type="file" name="imagen" id="form-marcador-imagen" accept="image/*" />
+    <div id="form-marcador-img-preview" style="margin-top:8px;max-width:220px;max-height:160px;overflow:hidden"></div>
+    <div id="form-marcador-extra" style="margin-top:10px">
+      <div id="form-marcador-clients" style="margin-top:8px;">
+        <label>Clientes (para Caja NAT)</label>
+        <div style="display:flex;gap:8px;align-items:center;margin-top:6px;">
+          <input id="form-marcador-client-name" type="text" placeholder="Nombre cliente" style="flex:1;padding:6px;border-radius:4px;border:1px solid #e3e3e3" />
+          <button id="form-marcador-client-add" type="button" class="btn" style="background:#10b981;padding:6px 10px">Agregar</button>
+        </div>
+        <div id="form-marcador-clients-list" style="margin-top:8px;max-height:120px;overflow:auto"></div>
+      </div>
+      <div id="form-marcador-nested" style="margin-top:8px;">
+        <label>Cajas anidadas (para Mufa)</label>
+        <select id="form-marcador-nested-select" multiple style="width:100%;height:90px;margin-top:6px;border:1px solid #e3e3e3;border-radius:6px;padding:6px"></select>
+      </div>
+    </div>
     <div class="modal-actions">
       <button type="submit" class="btn-save">Guardar</button>
       <button type="button" class="btn-cancel" onclick="window.cerrarModalMarcador && window.cerrarModalMarcador()">Cancelar</button>
@@ -349,7 +379,193 @@ export function abrirModalMarcador(latlng, onSave) {
   if (initial) {
     if (initial.nombre) form.nombre.value = initial.nombre;
     if (initial.descripcion) form.descripcion.value = initial.descripcion;
+    try { if (initial.state) form.estado.value = initial.state; } catch(e) {}
+    try {
+      // show existing image preview if available
+      if (initial.imageUrl) {
+        const pv = document.getElementById('form-marcador-img-preview');
+        if (pv) pv.innerHTML = `<img src="${initial.imageUrl}" style="max-width:220px;max-height:160px;display:block"/>`;
+      }
+    } catch(e) {}
   }
+  // Initialize clients/nested UI from initial data if present
+  setTimeout(() => {
+    try {
+      const clientsListEl = document.getElementById('form-marcador-clients-list');
+      const clientNameInput = document.getElementById('form-marcador-client-name');
+      const clientAddBtn = document.getElementById('form-marcador-client-add');
+      const nestedSelect = document.getElementById('form-marcador-nested-select');
+      const esMufaCheckbox = document.getElementById('form-marcador-es-mufa');
+      // Determine marker type: prefer initial.tipo/type; if available, use the map's canonical helper for robustness
+      let markerType = 'pin';
+      if (initial && (initial.tipo || initial.type)) markerType = String(initial.tipo || initial.type).toLowerCase();
+      else if (window.__tramosMapInstance && window.__tramosMapInstance._markerType) markerType = String(window.__tramosMapInstance._markerType).toLowerCase();
+      // If the instance exposes a canonical mapping, use it for consistent detection
+      try { if (window.__tramosMapInstance && typeof window.__tramosMapInstance._canonicalMarkerType === 'function') markerType = window.__tramosMapInstance._canonicalMarkerType(markerType); } catch(e) {}
+      // Show/hide clients section only for Caja NAT (flag/caja)
+      const clientsWrapper = document.getElementById('form-marcador-clients');
+      if (clientsWrapper) clientsWrapper.style.display = (markerType === 'caja' || markerType === 'flag') ? 'block' : 'none';
+      // Prefill 'Es una MUFA' checkbox if initial suggests it
+      try {
+        if (esMufaCheckbox) {
+          const nameLikelyMufa = initialLocal && ((initialLocal.nombre || initialLocal.name || '').toString().toLowerCase().indexOf('mufa') !== -1);
+          if (markerType === 'pin' || hasInitialNested || nameLikelyMufa) esMufaCheckbox.checked = true;
+          esMufaCheckbox.onchange = function() {
+            try {
+              const nestedWrapperEl = document.getElementById('form-marcador-nested');
+              if (esMufaCheckbox.checked) {
+                if (nestedWrapperEl) nestedWrapperEl.style.display = 'block';
+                window.__marcadorSelectMode = true;
+                window.__marcadorSelectFor = (initialLocal && (initialLocal.id || initialLocal.markerId)) ? String(initialLocal.id || initialLocal.markerId) : null;
+              } else {
+                if (nestedWrapperEl) nestedWrapperEl.style.display = 'none';
+                window.__marcadorSelectMode = false;
+                window.__marcadorSelectFor = null;
+              }
+            } catch(e) {}
+          };
+        }
+      } catch(e) {}
+      // Populate nestedSelect with existing caja markers for Mufa, or if the current marker already has nestedCajas show them
+      const nestedWrapper = document.getElementById('form-marcador-nested');
+      const initialLocal = window.__marcadorInitial || null;
+      // Enable selection mode by default when marker modal is open so clicking a Caja can be captured
+      try { window.__marcadorSelectMode = true; window.__marcadorSelectFor = (initialLocal && (initialLocal.id || initialLocal.markerId)) ? String(initialLocal.id || initialLocal.markerId) : null; } catch(e) {}
+      const hasInitialNested = initialLocal && Array.isArray(initialLocal.nestedCajas) && initialLocal.nestedCajas.length > 0;
+      if (nestedWrapper) {
+        const nameLikelyMufa2 = initialLocal && ((initialLocal.nombre || initialLocal.name || '').toString().toLowerCase().indexOf('pin') !== -1);
+        if (markerType === 'pin' || hasInitialNested || (esMufaCheckbox && esMufaCheckbox.checked) || nameLikelyMufa2) {
+          nestedWrapper.style.display = 'block';
+          // enable quick-selection: clicking a Caja on the map will add/remove it from this Mufa
+          try {
+            window.__marcadorSelectMode = true;
+            window.__marcadorSelectFor = (initialLocal && (initialLocal.id || initialLocal.markerId)) ? String(initialLocal.id || initialLocal.markerId) : null;
+            let hint = document.getElementById('form-marcador-nested-hint');
+            if (!hint) {
+              hint = document.createElement('div');
+              hint.id = 'form-marcador-nested-hint';
+              hint.style.fontSize = '12px';
+              hint.style.color = '#444';
+              hint.style.marginTop = '6px';
+              hint.textContent = 'Consejo: haga click en una Caja en el mapa para añadirla o quitarla.';
+              nestedWrapper.appendChild(hint);
+            } else {
+              hint.style.display = 'block';
+            }
+          } catch(e) { /* ignore */ }
+          if (nestedSelect) {
+            nestedSelect.innerHTML = '';
+            if (window.__tramosMapInstance && typeof window.__tramosMapInstance.getAllMarkers === 'function') {
+              const all = window.__tramosMapInstance.getAllMarkers();
+              // Include markers that are Caja NAT: canonical 'flag' or raw type contains 'caja'
+              all.forEach(x => {
+                try {
+                  const raw = (x.tipo || x.type || '').toString().toLowerCase();
+                  let canonical = raw;
+                  if (window.__tramosMapInstance && typeof window.__tramosMapInstance._canonicalMarkerType === 'function') {
+                    try { canonical = window.__tramosMapInstance._canonicalMarkerType(raw); } catch(e) { canonical = raw; }
+                  }
+                  if (canonical === 'flag' || raw.indexOf('caja') !== -1) {
+                    const opt = document.createElement('option');
+                    opt.value = x.id || x.markerId || `${x.lat}_${x.lng}`;
+                    opt.textContent = x.nombre || x.name || opt.value;
+                    nestedSelect.appendChild(opt);
+                  }
+                } catch(e) { /* ignore marker */ }
+              });
+            }
+            // If initial provided nested ids that are not present in current options, add placeholders so user sees them
+            if (hasInitialNested) {
+              const currentValues = Array.from(nestedSelect.options).map(o => String(o.value));
+              initialLocal.nestedCajas.forEach(nid => {
+                if (currentValues.indexOf(String(nid)) === -1) {
+                  const opt = document.createElement('option');
+                  opt.value = nid;
+                  opt.textContent = String(nid) + ' (no encontrada)';
+                  nestedSelect.appendChild(opt);
+                }
+              });
+            }
+            // show helper if no options at all
+            let helper = document.getElementById('form-marcador-nested-empty');
+            if (nestedSelect.options.length === 0) {
+              if (!helper) {
+                helper = document.createElement('div');
+                helper.id = 'form-marcador-nested-empty';
+                helper.style.color = '#666';
+                helper.style.fontSize = '12px';
+                helper.style.marginTop = '6px';
+                helper.textContent = '(No hay cajas disponibles)';
+                nestedWrapper.appendChild(helper);
+              } else {
+                helper.style.display = 'block';
+              }
+            } else if (helper) {
+              helper.style.display = 'none';
+            }
+          }
+        } else {
+          nestedWrapper.style.display = 'none';
+        }
+      }
+      // render clients if provided
+      const clients = (initialLocal && Array.isArray(initialLocal.clients)) ? initialLocal.clients.slice() : [];
+      function renderClients() {
+        if (!clientsListEl) return;
+        clientsListEl.innerHTML = '';
+        clients.forEach((cl, idx) => {
+          const div = document.createElement('div');
+          div.style.display = 'flex';
+          div.style.justifyContent = 'space-between';
+          div.style.alignItems = 'center';
+          div.style.padding = '6px 8px';
+          div.style.border = '1px solid #eee';
+          div.style.borderRadius = '6px';
+          div.style.marginBottom = '6px';
+          div.innerHTML = `<div><strong>${(cl.name||cl.nombre||cl.client||'Sin nombre')}</strong><div style="font-size:12px;color:#666">${cl.info||cl.telefono||''}</div></div>`;
+          const rem = document.createElement('button');
+          rem.type = 'button'; rem.textContent = 'Eliminar'; rem.className = 'btn-cancel'; rem.style.marginLeft='8px';
+          rem.onclick = () => { clients.splice(idx,1); renderClients(); };
+          div.appendChild(rem);
+          clientsListEl.appendChild(div);
+        });
+      }
+      if (clientAddBtn && clientNameInput) {
+        clientAddBtn.onclick = () => {
+          const v = clientNameInput.value && clientNameInput.value.trim();
+          if (!v) return _showToast('Ingrese nombre de cliente');
+          clients.push({ name: v });
+          clientNameInput.value = '';
+          renderClients();
+        };
+      }
+      renderClients();
+      // Pre-select nested cajas if initial has nestedCajas
+      if (initialLocal && initialLocal.nestedCajas && Array.isArray(initialLocal.nestedCajas) && nestedSelect && nestedSelect.style.display !== 'none') {
+        const vals = initialLocal.nestedCajas.map(x => String(x));
+        Array.from(nestedSelect.options).forEach(o => { o.selected = vals.indexOf(String(o.value)) !== -1; });
+      }
+      // Store clients on form for onsubmit
+      form.__clientsInternal = clients;
+    } catch(e) { /* ignore */ }
+  }, 40);
+  // wire preview for selected file
+  setTimeout(() => {
+    try {
+      const fileInput = document.getElementById('form-marcador-imagen');
+      const pv = document.getElementById('form-marcador-img-preview');
+      if (fileInput && pv) {
+        fileInput.addEventListener('change', (evt) => {
+          const f = evt.target.files && evt.target.files[0];
+          if (!f) { pv.innerHTML = ''; return; }
+          try {
+            const url = URL.createObjectURL(f);
+            pv.innerHTML = `<img src="${url}" style="max-width:220px;max-height:160px;display:block"/>`;
+          } catch(e) { pv.innerHTML = ''; }
+        });
+      }
+    } catch(e) {}
+  }, 30);
   form.onsubmit = function(e) {
     e.preventDefault();
     const nuevo = {
@@ -357,8 +573,34 @@ export function abrirModalMarcador(latlng, onSave) {
       descripcion: form.descripcion.value || '',
       lat: latlng.lat,
       lng: latlng.lng,
+      state: (form.estado && form.estado.value) ? form.estado.value : (initial && initial.state) || 'ok',
+      // image handling: the input may contain a File; we'll attach file reference under nuevo.__imageFile for upload handling
+      __imageFile: (document.getElementById('form-marcador-imagen') && document.getElementById('form-marcador-imagen').files && document.getElementById('form-marcador-imagen').files[0]) ? document.getElementById('form-marcador-imagen').files[0] : null,
+      // if editing and no new file chosen, preserve existing image URL
+      imageUrl: (initial && initial.imageUrl) ? initial.imageUrl : null,
       createdAt: (new Date()).toISOString()
     };
+    // attach clients and nestedCajas only if relevant for the marker type
+    try {
+      const clients = form.__clientsInternal || [];
+      const markerTypeRaw = (initial && (initial.tipo || initial.type)) ? (initial.tipo || initial.type) : ((window.__tramosMapInstance && window.__tramosMapInstance._markerType) ? window.__tramosMapInstance._markerType : 'pin');
+      const markerType = (''+markerTypeRaw).toLowerCase();
+      const esMufaCheckbox = document.getElementById('form-marcador-es-mufa');
+      const isMufa = esMufaCheckbox ? !!esMufaCheckbox.checked : (markerType.indexOf('pin') !== -1 || false);
+      if (isMufa) nuevo.tipo = 'pin';
+      if (markerType.indexOf('caja') !== -1 || markerType.indexOf('flag') !== -1) {
+        nuevo.clients = Array.isArray(clients) ? clients.slice() : [];
+      } else {
+        nuevo.clients = (initial && initial.clients) ? (Array.isArray(initial.clients) ? initial.clients.slice() : []) : [];
+      }
+      const nestedSelect = document.getElementById('form-marcador-nested-select');
+      if (isMufa && nestedSelect && nestedSelect.style.display !== 'none') {
+        const sel = Array.from(nestedSelect.selectedOptions).map(o => o.value);
+        nuevo.nestedCajas = sel;
+      } else {
+        nuevo.nestedCajas = (initial && initial.nestedCajas) ? (initial.nestedCajas.slice ? initial.nestedCajas.slice() : []) : [];
+      }
+    } catch(e) { nuevo.clients = []; nuevo.nestedCajas = []; }
     if (typeof onSave === 'function') onSave(nuevo);
     logStep('Guardar marcador', nuevo.nombre);
     cerrarModalMarcador();
@@ -382,6 +624,85 @@ export function abrirModalMarcador(latlng, onSave) {
       actions.appendChild(deleteBtn);
     }
   }, 30);
+  // Add a button to delete the current image (server or dataURL)
+  setTimeout(() => {
+    try {
+      const actions2 = document.querySelector('#modal-marcador .modal-actions');
+      if (!actions2 || document.getElementById('__delete_image_btn')) return;
+      const pv = document.getElementById('form-marcador-img-preview');
+      const initialLocal = window.__marcadorInitial || null;
+      // only show button if there's an existing image or file selected
+      if (!pv && !initialLocal) return;
+      const hasImage = (initialLocal && initialLocal.imageUrl) || (pv && pv.querySelector && pv.querySelector('img'));
+      if (!hasImage) return;
+      const imgBtn = document.createElement('button');
+      imgBtn.type = 'button';
+      imgBtn.className = 'btn-cancel';
+      imgBtn.id = '__delete_image_btn';
+      imgBtn.style.marginLeft = '8px';
+      imgBtn.textContent = 'Eliminar imagen';
+      imgBtn.onclick = async function() {
+        try {
+          const fileInput = document.getElementById('form-marcador-imagen');
+          // If a new file was chosen but not saved yet, just clear it
+          if (fileInput && fileInput.files && fileInput.files.length) {
+            fileInput.value = '';
+            if (pv) pv.innerHTML = '';
+            if (window.__marcadorInitial) window.__marcadorInitial.imageUrl = null;
+            _showToast('Imagen eliminada (local)');
+            return;
+          }
+          if (!initialLocal || !initialLocal.imageUrl) {
+            if (pv) pv.innerHTML = '';
+            _showToast('Imagen eliminada (local)');
+            return;
+          }
+          // If data URL, clear locally
+          if (initialLocal.imageUrl.indexOf('data:') === 0) {
+            initialLocal.imageUrl = null;
+            if (pv) pv.innerHTML = '';
+            _showToast('Imagen eliminada (local)');
+            return;
+          }
+          // Otherwise, attempt server delete by basename
+          const url = initialLocal.imageUrl;
+          try {
+            const path = (new URL(url, window.location.origin)).pathname;
+            const filename = path.split('/').pop();
+            const base = (window.__uploadEndpoint && window.__uploadEndpoint.replace(/\/+$/, '')) || '/marker-delete.php';
+            // Public PHP handler expects POST with 'filename' form field
+            if (base.endsWith('.php') || base.indexOf('/marker-delete') !== -1) {
+              const fd = new FormData();
+              fd.append('filename', filename);
+              const resp = await fetch(base, { method: 'POST', body: fd });
+              if (resp && resp.ok) {
+                const j = await resp.json().catch(() => null);
+                if (pv) pv.innerHTML = '';
+                if (window.__marcadorInitial) window.__marcadorInitial.imageUrl = null;
+                _showToast('Imagen eliminada');
+              } else {
+                _showToast('No se pudo eliminar la imagen en el servidor');
+              }
+            } else {
+              // Assume a REST API that supports DELETE /{filename}
+              const delUrl = base + '/' + encodeURIComponent(filename);
+              const resp = await fetch(delUrl, { method: 'DELETE' });
+              if (resp && resp.ok) {
+                if (pv) pv.innerHTML = '';
+                if (window.__marcadorInitial) window.__marcadorInitial.imageUrl = null;
+                _showToast('Imagen eliminada');
+              } else {
+                _showToast('No se pudo eliminar la imagen en el servidor');
+              }
+            }
+          } catch(e) {
+            _showToast('Error eliminando imagen');
+          }
+        } catch(e) { _showToast('Error eliminando imagen'); }
+      };
+      actions2.appendChild(imgBtn);
+    } catch(e) { /* ignore */ }
+  }, 40);
   window.cerrarModalMarcador = cerrarModalMarcador;
 }
 export function cerrarModalMarcador() {
@@ -393,6 +714,13 @@ export function cerrarModalMarcador() {
   window.__marcadorInitial = null;
   window.__marcadorOnClose = null;
   window.__marcadorOnDelete = null;
+  // clear modal map-selection mode if active
+  try {
+    window.__marcadorSelectMode = false;
+    window.__marcadorSelectFor = null;
+    const hint = document.getElementById('form-marcador-nested-hint');
+    if (hint && hint.parentNode) hint.parentNode.removeChild(hint);
+  } catch(e) {}
   // Libera el lock SIEMPRE
   window.__interactionLock = false;
   // Elimina botón flotante si existe
@@ -948,6 +1276,161 @@ export class TramosMap {
     return t;
   }
 
+  // Generate simple unique marker id
+  _generateMarkerId() {
+    return 'm-' + Date.now() + '-' + Math.floor(Math.random() * 9000 + 1000);
+  }
+
+  // Build popup HTML for a marker (includes state badge)
+  _buildMarkerPopup(p) {
+    const rawType = (p.tipo || p.type || '').toString().toLowerCase();
+    const canonical = (typeof this._canonicalMarkerType === 'function') ? this._canonicalMarkerType(rawType) : rawType;
+    let tipoHumano = '';
+    if (canonical === 'pin') {
+      if (rawType.indexOf('mufa') !== -1) tipoHumano = 'Mufa';
+      else tipoHumano = 'Manga';
+    } else if (canonical === 'star') {
+      tipoHumano = 'Reserva';
+    } else if (canonical === 'flag') {
+      tipoHumano = 'Caja NAT';
+    } else if (rawType && rawType.length) {
+      tipoHumano = rawType.charAt(0).toUpperCase() + rawType.slice(1);
+    }
+    const nombre = p.nombre || p.name || 'Sin nombre';
+    const desc = p.descripcion || p.description || '';
+    const lat = typeof p.lat === 'number' ? p.lat.toFixed(6) : (p.lat || '');
+    const lng = typeof p.lng === 'number' ? p.lng.toFixed(6) : (p.lng || '');
+    const created = p.createdAt ? new Date(p.createdAt).toLocaleString() : '';
+    const state = (p.state || 'ok').toString();
+    let stateColor = '#10b981';
+    if (state === 'warn') stateColor = '#f59e0b';
+    else if (state === 'alarm') stateColor = '#ef4444';
+    else if (state === 'offline') stateColor = '#6b7280';
+    const stateLabel = `<span style="display:inline-block;padding:2px 8px;border-radius:8px;background:${stateColor};color:#fff;font-weight:600;margin-left:6px;font-size:12px">${state.toUpperCase()}</span>`;
+    // Compose extra details for Caja NAT (clients) and Mufa (nested cajas)
+    let extras = '';
+    try {
+      // Caja NAT: show clients
+      if (canonical === 'flag' || rawType.indexOf('caja') !== -1) {
+        const clients = Array.isArray(p.clients) ? p.clients : [];
+        if (clients.length) {
+          extras += `<div style="margin-top:8px"><b>Clientes:</b><ul style="padding-left:16px;margin:6px 0">${clients.map(c=>`<li style="margin-bottom:4px">${(c.name||c.nombre||c.client||'Sin nombre')}${c.info?` - <span style=\"color:#666;font-size:12px\">${c.info}</span>`:''}</li>`).join('')}</ul></div>`;
+        } else {
+          extras += `<div style="margin-top:8px"><b>Clientes:</b> <span style="color:#666">(ninguno)</span></div>`;
+        }
+      }
+      // Mufa: show nested cajas (referenced by id) — show also when nestedCajas present or name suggests Mufa
+      const isMufaPopup = (rawType.indexOf('pin') !== -1) || (Array.isArray(p.nestedCajas) && p.nestedCajas.length > 0) || ((p.nombre || p.name || '').toString().toLowerCase().indexOf('pin') !== -1);
+      if (isMufaPopup) {
+        const nested = Array.isArray(p.nestedCajas) ? p.nestedCajas : [];
+        if (nested.length) {
+          // lookup caja names from current markers if available
+          const rows = nested.map(id => {
+            try {
+              const found = this.marcadores.find(m => String(m.id) === String(id));
+              if (found) return `<li style=\"margin-bottom:4px\"><b>${found.nombre||found.name||'Caja'}</b> (${String(found.id)})</li>`;
+            } catch(e) {}
+            return `<li style=\"margin-bottom:4px\">${String(id)}</li>`;
+          }).join('');
+          extras += `<div style="margin-top:8px"><b>Cajas anidadas:</b><ul style="padding-left:16px;margin:6px 0">${rows}</ul></div>`;
+        } else {
+          extras += `<div style="margin-top:8px"><b>Cajas anidadas:</b> <span style="color:#666">(ninguna)</span></div>`;
+        }
+      }
+    } catch(e) { /* ignore extras rendering errors */ }
+
+    return `<div style="min-width:180px;max-width:420px;font-size:13px;color:#111">
+      <div style="font-weight:700;margin-bottom:6px">${nombre}</div>
+      <div style="margin-bottom:6px;color:#444">${desc}</div>
+      ${tipoHumano ? `<div style="font-size:12px;color:#666">Tipo: <b>${tipoHumano}</b></div>` : ''}
+      <div style="font-size:12px;color:#666">Estado: ${stateLabel}</div>
+      <div style="font-size:12px;color:#666">Coordenadas: <span>${lat}, ${lng}</span></div>
+      ${created ? `<div style="font-size:12px;color:#666">Creado: <span>${created}</span></div>` : ''}
+      ${extras}
+    </div>`;
+  }
+
+  // Apply visual styling to a Leaflet marker element based on state (box-shadow + border)
+  _applyMarkerVisual(markerObj, state) {
+    if (!markerObj) return;
+    const st = (state || 'ok').toString();
+    let color = '#10b981';
+    if (st === 'warn') color = '#f59e0b';
+    else if (st === 'alarm') color = '#ef4444';
+    else if (st === 'offline') color = '#6b7280';
+    const apply = (el) => {
+      try {
+        el.style.boxShadow = `0 0 10px ${color}`;
+        // ensure a subtle border so icon shapes are clearer
+        el.style.border = `2px solid ${color}`;
+        el.style.borderRadius = '6px';
+        el.style.transition = 'box-shadow 0.18s, border 0.18s';
+      } catch (e) {}
+    };
+    const el = (typeof markerObj.getElement === 'function') ? markerObj.getElement() : null;
+    if (el) apply(el);
+    else {
+      // if not yet in DOM, apply when added
+      try { markerObj.on('add', () => { const e = markerObj.getElement(); if (e) apply(e); }); } catch(e){}
+    }
+  }
+
+  // Set marker state by id
+  setMarkerState(markerId, state) {
+    if (!markerId) return false;
+    const idx = this.marcadores.findIndex(m => m.id === markerId);
+    if (idx === -1) return false;
+    this.marcadores[idx].state = state;
+    try {
+      const layer = this._markerLayers[idx];
+      if (layer) {
+        try { layer.setPopupContent(this._buildMarkerPopup(this.marcadores[idx])); } catch(e){}
+        this._applyMarkerVisual(layer, state);
+      }
+    } catch(e){}
+    try { this._renderInfo(); } catch(e){}
+    document.dispatchEvent(new CustomEvent('tramos:marker-state-changed', { detail: { id: markerId, state } }));
+    return true;
+  }
+
+  // Update marker state by approximate coordinates (finds nearest marker within small tolerance)
+  updateMarkerStateByLatLng(lat, lng, state) {
+    if (typeof lat !== 'number' || typeof lng !== 'number') return false;
+    const tol = 0.00005; // ~5m tolerance
+    const idx = this.marcadores.findIndex(m => Math.abs((+m.lat) - lat) < tol && Math.abs((+m.lng) - lng) < tol);
+    if (idx === -1) return false;
+    const id = this.marcadores[idx].id;
+    return this.setMarkerState(id, state);
+  }
+
+  // Apply bulk states: [{id,state}, ...] or [{lat,lng,state}, ...]
+  applyMarkerStates(arr) {
+    if (!Array.isArray(arr)) return;
+    arr.forEach(item => {
+      if (item && item.id) this.setMarkerState(item.id, item.state);
+      else if (item && typeof item.lat === 'number' && typeof item.lng === 'number') this.updateMarkerStateByLatLng(item.lat, item.lng, item.state);
+    });
+  }
+
+  // Set or update the marker image (icon) given marker id and an image URL (can be data URL)
+  setMarkerImage(markerId, imageUrl) {
+    if (!markerId) return false;
+    const idx = this.marcadores.findIndex(m => m.id === markerId);
+    if (idx === -1) return false;
+    this.marcadores[idx].imageUrl = imageUrl;
+    const layer = this._markerLayers[idx];
+    if (!layer) return true;
+    try {
+      // create an icon sized reasonably; fall back if image load fails
+      const icon = L.icon({ iconUrl: imageUrl, iconSize: [40, 40], iconAnchor: [20, 40], popupAnchor: [0, -36] });
+      layer.setIcon && layer.setIcon(icon);
+    } catch (e) {
+      // ignore
+    }
+    try { layer.setPopupContent(this._buildMarkerPopup(this.marcadores[idx])); } catch(e){}
+    return true;
+  }
+
   // Control visibility of a named layer/group
   setLayerVisibility(name, visible) {
     if (!name) return;
@@ -1035,7 +1518,7 @@ export class TramosMap {
 
   // Add a marker object to internal state and render on map
   addMarker(marcador) {
-    const safe = Object.assign({ nombre: 'Sin nombre', descripcion: '', lat: 0, lng: 0, tipo: this._markerType || 'pin', createdAt: (new Date()).toISOString() }, marcador || {});
+    const safe = Object.assign({ nombre: 'Sin nombre', descripcion: '', lat: 0, lng: 0, tipo: this._markerType || 'pin', state: 'ok', createdAt: (new Date()).toISOString() }, marcador || {});
     // Try to use bundle PNG icons if present
     const iconByType = {
       // Use persistent public images (place these files in public/images/)
@@ -1066,42 +1549,14 @@ export class TramosMap {
       markerObj = L.marker([safe.lat, safe.lng], { icon });
     }
     // Persist a plain object (no Leaflet instance) in marcadores
-    const plain = { nombre: safe.nombre, descripcion: safe.descripcion, lat: safe.lat, lng: safe.lng, tipo: safe.tipo, createdAt: safe.createdAt, included: true };
-    const self = this;
-    function _buildMarkerPopup(p) {
-      const rawType = (p.tipo || p.type || '').toString().toLowerCase();
-      const canonical = (typeof self._canonicalMarkerType === 'function') ? self._canonicalMarkerType(rawType) : rawType;
-      let tipoHumano = '';
-      if (canonical === 'pin') {
-        if (rawType.indexOf('mufa') !== -1) tipoHumano = 'Mufa';
-        else tipoHumano = 'Manga';
-      } else if (canonical === 'star') {
-        tipoHumano = 'Reserva';
-      } else if (canonical === 'flag') {
-        tipoHumano = 'Caja NAT';
-      } else if (rawType && rawType.length) {
-        tipoHumano = rawType.charAt(0).toUpperCase() + rawType.slice(1);
-      }
-      const nombre = p.nombre || p.name || 'Sin nombre';
-      const desc = p.descripcion || p.description || '';
-      const lat = typeof p.lat === 'number' ? p.lat.toFixed(6) : (p.lat || '');
-      const lng = typeof p.lng === 'number' ? p.lng.toFixed(6) : (p.lng || '');
-      const created = p.createdAt ? new Date(p.createdAt).toLocaleString() : '';
-      return `<div style="min-width:180px;max-width:320px;font-size:13px;color:#111">
-        <div style="font-weight:700;margin-bottom:6px">${nombre}</div>
-        <div style="margin-bottom:6px;color:#444">${desc}</div>
-        ${tipoHumano ? `<div style="font-size:12px;color:#666">Tipo: <b>${tipoHumano}</b></div>` : ''}
-        <div style="font-size:12px;color:#666">Coordenadas: <span>${lat}, ${lng}</span></div>
-        ${created ? `<div style="font-size:12px;color:#666">Creado: <span>${created}</span></div>` : ''}
-      </div>`;
-    }
-    markerObj.bindPopup(_buildMarkerPopup(plain));
+    const plain = { id: safe.id || this._generateMarkerId(), nombre: safe.nombre, descripcion: safe.descripcion, lat: safe.lat, lng: safe.lng, tipo: safe.tipo, state: safe.state || 'ok', imageUrl: safe.imageUrl || null, createdAt: safe.createdAt, included: true, clients: safe.clients || [], nestedCajas: safe.nestedCajas || [] };
+    markerObj.bindPopup(this._buildMarkerPopup(plain));
   // Add to internal arrays
   this.marcadores.push(plain);
   this._markerLayers.push(markerObj);
     // Place marker inside the appropriate layer group so it can be toggled
-    try {
-      const canonical = this._canonicalMarkerType(safe.tipo);
+      try {
+        const canonical = this._canonicalMarkerType(safe.tipo);
       // Ensure group exists
       if (!this._markerGroups[canonical]) {
         this._markerGroups[canonical] = L.layerGroup().addTo(this.map);
@@ -1122,11 +1577,50 @@ export class TramosMap {
       try { markerObj.addTo(this.map); } catch(e){}
     }
 
+    // apply visual style for state (box-shadow/border)
+    try { this._applyMarkerVisual(markerObj, plain.state); } catch(e) {}
+
   // show immediate feedback
   try { _showToast('Marcador agregado'); } catch(e) {}
 
-    // Wire single-click to open popup (default) and double-click to edit/delete
-    markerObj.on('click', () => {
+    // Wire single-click to open popup (default).
+    // If modal selection mode is active (editing a Mufa), clicking a Caja will toggle it in the nested list.
+    markerObj.on('click', (ev) => {
+      try {
+        if (window.__marcadorSelectMode) {
+          // Only act if there's a marker being edited (window.__marcadorInitial)
+          const targetEditing = window.__marcadorInitial && (window.__marcadorInitial.id || window.__marcadorInitial.markerId) ? String(window.__marcadorInitial.id || window.__marcadorInitial.markerId) : null;
+          if (targetEditing) {
+            // If clicked marker is a Caja NAT, toggle it in the nested select
+            const rawType = (plain.tipo || plain.type || '').toString().toLowerCase();
+            const canonical = (typeof this._canonicalMarkerType === 'function') ? this._canonicalMarkerType(rawType) : rawType;
+            if (canonical === 'flag' || rawType.indexOf('caja') !== -1) {
+              const nestedSelect = document.getElementById('form-marcador-nested-select');
+              if (nestedSelect) {
+                let opt = Array.from(nestedSelect.options).find(o => String(o.value) === String(plain.id));
+                if (!opt) {
+                  opt = document.createElement('option');
+                  opt.value = plain.id;
+                  opt.textContent = plain.nombre || plain.name || String(plain.id);
+                  nestedSelect.appendChild(opt);
+                }
+                opt.selected = !opt.selected;
+                // update modal initial data so onSave persists it
+                const selectedVals = Array.from(nestedSelect.selectedOptions).map(o => o.value);
+                if (window.__marcadorInitial) window.__marcadorInitial.nestedCajas = selectedVals.slice();
+                // also update the in-memory marker for the MUFA being edited so its popup shows current selection
+                const idxEditing = this.marcadores.findIndex(m => String(m.id) === String(targetEditing));
+                if (idxEditing !== -1) {
+                  this.marcadores[idxEditing].nestedCajas = selectedVals.slice();
+                  try { const layer = this._markerLayers[idxEditing]; if (layer) layer.setPopupContent(this._buildMarkerPopup(this.marcadores[idxEditing])); } catch(e){}
+                }
+                try { _showToast(opt.selected ? 'Caja seleccionada' : 'Caja deseleccionada'); } catch(e){}
+              }
+              return;
+            }
+          }
+        }
+      } catch(e) { /* ignore selection errors */ }
       markerObj.openPopup();
     });
     markerObj.on('dblclick', (ev) => {
@@ -1164,9 +1658,56 @@ export class TramosMap {
         plain.descripcion = nuevo.descripcion;
         plain.lat = nuevo.lat;
         plain.lng = nuevo.lng;
+        // save state if provided from modal
+        if (nuevo.state) plain.state = nuevo.state;
+        // if modal set a tipo (e.g., marked as mufa), persist it
+        try { if (nuevo.tipo) plain.tipo = nuevo.tipo; } catch(e) {}
         markerObj.setLatLng([nuevo.lat, nuevo.lng]);
-        // update popup with rich content
-        try { markerObj.setPopupContent(_buildMarkerPopup(plain)); } catch(e) { markerObj.setPopupContent(`<b>${nuevo.nombre}</b><br/>${nuevo.descripcion || ''}`); }
+        // Handle image upload/preservation asynchronously
+        (async () => {
+          try {
+            if (nuevo.__imageFile) {
+              let url = null;
+              // prefer app-provided upload handler
+              if (typeof window.__uploadImageHandler === 'function') {
+                try { url = await window.__uploadImageHandler(nuevo.__imageFile, { markerId: plain.id }); } catch(e) { url = null; }
+              }
+              if (!url) {
+                // Try default upload endpoint (prefer marker-images)
+                try {
+                  const fd = new FormData(); fd.append('file', nuevo.__imageFile);
+                  const defaultEndpoint = window.__uploadEndpoint || '/marker-upload.php';
+                  const resp = await fetch(defaultEndpoint, { method: 'POST', body: fd });
+                  if (resp && resp.ok) {
+                    const j = await resp.json(); if (j && j.url) url = j.url;
+                  }
+                } catch(e) { url = null; }
+              }
+              if (!url) {
+                // fallback: embed as data URL (may be large)
+                try {
+                  url = await new Promise((res, rej) => {
+                    const r = new FileReader(); r.onload = () => res(r.result); r.onerror = rej; r.readAsDataURL(nuevo.__imageFile);
+                  });
+                } catch(e) { url = null; }
+              }
+              if (url) {
+                plain.imageUrl = url;
+                try { this.setMarkerImage && this.setMarkerImage(plain.id, url); } catch(e) {}
+              }
+            } else if (nuevo.imageUrl) {
+              plain.imageUrl = nuevo.imageUrl;
+              try { this.setMarkerImage && this.setMarkerImage(plain.id, plain.imageUrl); } catch(e) {}
+            }
+          } catch(e) { /* ignore upload errors */ }
+        })();
+
+        // update popup with rich content and visuals
+        // persist clients/nestedCajas from modal
+        try { if (nuevo.clients) plain.clients = nuevo.clients; } catch(e) {}
+        try { if (nuevo.nestedCajas) plain.nestedCajas = nuevo.nestedCajas; } catch(e) {}
+        try { markerObj.setPopupContent(this._buildMarkerPopup(plain)); } catch(e) { markerObj.setPopupContent(`<b>${nuevo.nombre}</b><br/>${nuevo.descripcion || ''}`); }
+        try { this._applyMarkerVisual(markerObj, plain.state); } catch(e) {}
         this._renderInfo();
         logStep('Editar marcador', nuevo.nombre);
         try { _showToast('Marcador actualizado'); } catch(e) {}

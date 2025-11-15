@@ -104,11 +104,16 @@ document.addEventListener('DOMContentLoaded', async () => {
             marcadores.forEach(m => {
                 // Normalizar posibles claves en distintos idiomas/formatos
                 const norm = {
+                    id: m.id || m.markerId || null,
                     nombre: m.name || m.nombre || '',
                     descripcion: m.description || m.descripcion || '',
                     lat: Number(m.lat ?? m.latitude ?? 0),
                     lng: Number(m.lng ?? m.lon ?? m.longitude ?? 0),
                     tipo: m.type || m.tipo || 'pin',
+                    state: m.state || m.estado || 'ok',
+                    imageUrl: m.imageUrl || m.image || null,
+                    clients: m.clients || m.clientes || [],
+                    nestedCajas: m.nestedCajas || m.cajasAnidadas || [],
                     createdAt: m.createdAt || m.created_at || new Date().toISOString()
                 };
                 // Sólo agregar si lat/lng parecen válidos
@@ -199,15 +204,38 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
         // DEBUG: log what we are sending so we can verify markers exist
         try { console.debug('Saving payload: tramos=', nuevosTramos, 'marcadores=', marcadores); } catch(e) {}
-        // Normalize marker objects to expected shape
-        const normalizedMarkers = (Array.isArray(marcadores) ? marcadores : []).map(m => ({
-            type: m.tipo || m.type || 'pin',
-            name: m.nombre || m.name || '',
-            description: m.descripcion || m.description || '',
-            lat: Number(m.lat) || 0,
-            lng: Number(m.lng) || 0,
-            createdAt: m.createdAt || new Date().toISOString()
-        }));
+        // Normalize marker objects to expected shape and resolve nestedCajas to friendly objects when possible
+        const rawMarkers = Array.isArray(marcadores) ? marcadores : [];
+        const lookup = {};
+        rawMarkers.forEach(m => {
+            const key = String(m.id || m.markerId || `${m.lat}_${m.lng}`);
+            lookup[key] = m;
+        });
+        const normalizedMarkers = rawMarkers.map(m => {
+            const id = m.id || m.markerId || null;
+            const nestedIds = Array.isArray(m.nestedCajas) ? m.nestedCajas.slice() : (Array.isArray(m.cajasAnidadas) ? m.cajasAnidadas.slice() : []);
+            const nestedResolved = nestedIds.map(x => {
+                const k = String(x);
+                const found = lookup[k];
+                if (found) return { id: found.id || found.markerId || k, name: found.nombre || found.name || '' };
+                return { id: k, name: '' };
+            });
+            return {
+                id: id,
+                type: m.tipo || m.type || 'pin',
+                name: m.nombre || m.name || '',
+                description: m.descripcion || m.description || '',
+                lat: Number(m.lat) || 0,
+                lng: Number(m.lng) || 0,
+                state: m.state || m.estado || 'ok',
+                imageUrl: m.imageUrl || m.image || null,
+                included: (typeof m.included === 'boolean') ? m.included : true,
+                clients: m.clients || m.clientes || [],
+                nestedCajas: nestedIds,
+                nestedCajasResolved: nestedResolved,
+                createdAt: m.createdAt || new Date().toISOString()
+            };
+        });
         const marcadoresCount = normalizedMarkers.length;
         // Calcular y guardar resumen de entidades
         const resumenEntidades = calcularResumenProyecto(enhancedTramos, normalizedMarkers);

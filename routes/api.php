@@ -1,7 +1,16 @@
 <?php
-
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
+use App\Http\Controllers\MarkerImageController;
+
+// Marker image endpoints (support both /api/marker-images and legacy /api/uploads)
+Route::post('/marker-images', [MarkerImageController::class, 'store']);
+Route::post('/uploads', [MarkerImageController::class, 'store']);
+Route::delete('/marker-images/{filename}', [MarkerImageController::class, 'destroy']);
+// Health check for marker-images routes (useful for quick diagnostics)
+Route::get('/marker-images/health', function() {
+    return response()->json(['ok' => true]);
+});
 
 // Simple API for development: create project and save tramos
 Route::post('/projects', function (Request $request) {

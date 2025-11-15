@@ -23,3 +23,5 @@ use App\Http\Controllers\Api\ProjectsController;
 Route::post('/api/projects', [ProjectsController::class, 'store']);
 Route::post('/api/projects/{id}/tramos', [ProjectsController::class, 'saveTramos']);
 Route::get('/api/projects/{id}', [ProjectsController::class, 'show']);
+
+// NOTE: marker-image API routes live in routes/api.php to avoid CSRF middleware issues.
